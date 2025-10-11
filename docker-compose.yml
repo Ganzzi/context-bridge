@@ -1,0 +1,57 @@
+services:
+  # PostgreSQL Database with pgvector extension for vector storage
+  postgres:
+    image: tensorchord/vchord-suite:pg16-latest
+    container_name: context_bridge_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-context_bridge}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-context_bridge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - context_bridge_network
+
+  # Ollama for local embeddings and AI models
+  ollama:
+    image: ollama/ollama:latest
+    container_name: context_bridge_ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ${OLLAMA_HOST_VOLUME_PATH:-./ollama_data}:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - context_bridge_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  context_bridge_network:
+    driver: bridge
