@@ -17,6 +17,7 @@ class Config(BaseModel):
     postgres_user: str = Field(default_factory=lambda: os.getenv("POSTGRES_USER", "postgres"))
     postgres_password: str = Field(default_factory=lambda: os.getenv("POSTGRES_PASSWORD", ""))
     postgres_db: str = Field(default_factory=lambda: os.getenv("POSTGRES_DB", "context_bridge"))
+    postgres_max_pool_size: int = Field(default_factory=lambda: int(os.getenv("DB_POOL_MAX", "10")))
 
     # Ollama Configuration
     ollama_base_url: str = Field(
@@ -26,7 +27,6 @@ class Config(BaseModel):
         default_factory=lambda: os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
     )
     vector_dimension: int = Field(default_factory=lambda: int(os.getenv("VECTOR_DIMENSION", "768")))
-
 
     # Search Configuration
     similarity_threshold: float = Field(
@@ -54,6 +54,7 @@ class Config(BaseModel):
                 f"Current length: {len(v)}"
             )
         return v
+
 
 # Global config instance
 _config: Optional[Config] = None

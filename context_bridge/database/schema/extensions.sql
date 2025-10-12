@@ -92,18 +92,21 @@ CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks (document_id);
 
 CREATE INDEX IF NOT EXISTS idx_chunks_group ON chunks (group_id);
 
-CREATE INDEX IF NOT EXISTS idx_chunks_vector ON chunks USING vchord (embedding);
+CREATE INDEX IF NOT EXISTS idx_chunks_vector ON chunks USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
 
-CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks USING vchord_bm25 (bm25_vector);
+CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks USING bm25 (bm25_vector bm25_ops);
 
 -- Trigger: Auto-generate bm25_vector from content
 CREATE OR REPLACE FUNCTION generate_bm25_vector()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.bm25_vector := bm25_tokenize_text(NEW.content);
+    NEW.bm25_vector := tokenize(NEW.content, 'bert');
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS chunks_bm25_trigger ON chunks;
 
 CREATE TRIGGER chunks_bm25_trigger
 BEFORE INSERT OR UPDATE OF content ON chunks
@@ -119,10 +122,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_doc_on_page_insert ON pages;
+
 CREATE TRIGGER update_doc_on_page_insert
 AFTER INSERT ON pages
 FOR EACH ROW
 EXECUTE FUNCTION update_document_timestamp();
+
+DROP TRIGGER IF EXISTS update_doc_on_chunk_insert ON chunks;
 
 CREATE TRIGGER update_doc_on_chunk_insert
 AFTER INSERT ON chunks

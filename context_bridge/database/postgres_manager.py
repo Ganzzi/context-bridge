@@ -6,7 +6,7 @@ Provides connection pool management for the context_bridge package.
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 
 from psqlpy import ConnectionPool, Connection
@@ -60,10 +60,12 @@ class PostgreSQLManager:
                 if self._pool is None:
                     self._pool = ConnectionPool(
                         dsn=self.dsn,
-                        max_db_pool_size=10,  # Reasonable default for agent operations
+                        max_db_pool_size=self.config.postgres_max_pool_size,
                     )
                     self._initialized = True
-                    logger.info("PostgreSQL connection pool initialized (max_size=10)")
+                    logger.info(
+                        f"PostgreSQL connection pool initialized (max_size={self.config.postgres_max_pool_size})"
+                    )
                     return
             except Exception as e:
                 if attempt == max_retries - 1:
@@ -86,13 +88,14 @@ class PostgreSQLManager:
 
         try:
             async with self.connection() as conn:
-                result = await conn.execute("SELECT 1 as health_check")
+                result = await conn.execute("SELECT 1 as health")
                 rows = result.result()
-                if rows and len(rows) > 0 and rows[0].get("health_check") == 1:
+                # PSQLPy returns results as list of dicts with column names as keys
+                if rows and len(rows) > 0 and rows[0].get("health") == 1:
                     logger.debug("PostgreSQL health check passed")
                     return True
                 else:
-                    logger.error("PostgreSQL health check failed: unexpected result")
+                    logger.error(f"PostgreSQL health check failed: unexpected result {rows}")
                     return False
         except Exception as e:
             logger.error(f"PostgreSQL health check failed: {e}")
@@ -107,7 +110,9 @@ class PostgreSQLManager:
         # Note: PSQLPy doesn't expose detailed pool statistics directly
         # We can log basic info about the pool state
         pool_status = "initialized" if self._initialized else "not initialized"
-        logger.info(f"PostgreSQL connection pool status: {pool_status}, max_size=10")
+        logger.info(
+            f"PostgreSQL connection pool status: {pool_status}, max_size={self.config.postgres_max_pool_size}"
+        )
 
     async def close(self) -> None:
         """Close the connection pool and clean up resources gracefully."""
@@ -134,7 +139,7 @@ class PostgreSQLManager:
             raise
 
     @asynccontextmanager
-    async def connection(self):
+    async def connection(self) -> AsyncGenerator[Connection, None]:
         """
         Get a connection from the pool (context manager).
 
@@ -155,20 +160,6 @@ class PostgreSQLManager:
             # Connection is automatically returned to pool when context exits
             pass
 
-    async def get_connection(self) -> Connection:
-        """
-        Get a connection from the pool (manual management).
-
-        Note: Prefer using the connection() context manager for automatic cleanup.
-
-        Returns:
-            Connection from the pool
-        """
-        if not self._initialized or not self._pool:
-            raise RuntimeError("PostgreSQL manager not initialized. Call initialize() first.")
-
-        return await self._pool.connection()
-
     async def execute(self, query: str, parameters: Optional[list] = None):
         """
         Execute a query using a connection from the pool.
@@ -182,30 +173,6 @@ class PostgreSQLManager:
         """
         async with self.connection() as conn:
             return await conn.execute(query, parameters or [])
-
-    async def execute_many(self, query: str, parameters_list: list[list]):
-        """
-        Execute a query multiple times with different parameters.
-
-        Args:
-            query: SQL query to execute
-            parameters_list: List of parameter lists
-
-        Returns:
-            List of query results
-
-        Example:
-            results = await manager.execute_many(
-                "INSERT INTO table (col1, col2) VALUES ($1, $2)",
-                [["val1", "val2"], ["val3", "val4"]]
-            )
-        """
-        async with self.connection() as conn:
-            results = []
-            for parameters in parameters_list:
-                result = await conn.execute(query, parameters)
-                results.append(result)
-            return results
 
     async def execute_transaction(self, operations: list) -> None:
         """
@@ -244,64 +211,6 @@ class PostgreSQLManager:
 
                 logger.error(f"Transaction failed: {e}")
                 raise
-
-    async def verify_connection(self) -> bool:
-        """
-        Verify that the database connection is working.
-
-        Returns:
-            True if connection is working, False otherwise
-        """
-        try:
-            async with self.connection() as conn:
-                result = await conn.execute("SELECT 1")
-                return True
-        except Exception as e:
-            logger.error(f"Failed to verify PostgreSQL connection: {e}")
-            return False
-
-    async def ensure_extensions(self) -> None:
-        """
-        Ensure required PostgreSQL extensions are installed.
-
-        Required extensions:
-        - vector: For vector similarity search
-        - pg_tokenizer: For text tokenization
-        - vchord_bm25: For BM25 full-text search
-        """
-        extensions = ["vector", "pg_tokenizer", "vchord_bm25"]
-
-        for extension in extensions:
-            try:
-                query = f"CREATE EXTENSION IF NOT EXISTS {extension} CASCADE"
-                await self.execute(query)
-                logger.info(f"Ensured extension exists: {extension}")
-            except Exception as e:
-                logger.warning(
-                    f"Could not create extension {extension}: {e}. "
-                    f"You may need superuser privileges."
-                )
-
-    async def table_exists(self, table_name: str) -> bool:
-        """
-        Check if a table exists in the database.
-
-        Args:
-            table_name: Name of the table to check
-
-        Returns:
-            True if table exists, False otherwise
-        """
-        query = """
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = $1
-            )
-        """
-        async with self.connection() as conn:
-            result = await conn.execute(query, [table_name])
-            row = result.result()[0]
-            return row[0] if row else False
 
     # Context manager support
     async def __aenter__(self):

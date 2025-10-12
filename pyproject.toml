@@ -65,7 +65,7 @@ dev = [
     "mkdocs-material>=9.4.0",
 ]
 all = [
-    "context-bridge[gemini,mcp,ui,dev]",
+    "context-bridge[mcp,ui,dev]",
 ]
 
 [project.urls]

@@ -18,33 +18,26 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
-from psqlpy import ConnectionPool
+from context_bridge.config import get_config
+from context_bridge.database.postgres_manager import PostgreSQLManager
 
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from context_bridge.config import get_config
-
 
 async def verify_schema():
     """Verify all tables, indexes, and extensions exist."""
     config = get_config()
-
-    # Build DSN
-    dsn = (
-        f"postgresql://{config.postgres_user}:{config.postgres_password}"
-        f"@{config.postgres_host}:{config.postgres_port}/{config.postgres_db}"
-    )
+    manager = PostgreSQLManager(config)
+    await manager.initialize()
 
     print(f"🔍 Verifying schema in: {config.postgres_db}")
-    pool = ConnectionPool(dsn=dsn, max_db_pool_size=2)
 
     try:
-        conn = await pool.connection()
-
-        # Check extensions
-        required_extensions = ["vector", "vchord", "pg_tokenizer", "vchord_bm25"]
+        async with manager.connection() as conn:
+            # Check extensions
+            required_extensions = ["vector", "vchord", "pg_tokenizer", "vchord_bm25"]
         print("\n🔧 Checking extensions...")
         for ext in required_extensions:
             try:
@@ -92,34 +85,33 @@ async def verify_schema():
         return True
 
     finally:
-        pool.close()
+        await manager.close()
 
 
 async def reset_database():
     """Drop and recreate all tables (dev only)."""
     config = get_config()
-
-    # Build DSN
-    dsn = (
-        f"postgresql://{config.postgres_user}:{config.postgres_password}"
-        f"@{config.postgres_host}:{config.postgres_port}/{config.postgres_db}"
-    )
+    manager = PostgreSQLManager(config)
+    await manager.initialize()
 
     print(f"🗑️  Resetting database: {config.postgres_db}")
     print("⚠️  This will DROP ALL TABLES and DATA!")
 
     # Safety check - only allow in development
-    if config.postgres_db != "context_bridge_dev":
-        print(f"❌ Reset only allowed in development database. Current: {config.postgres_db}")
-        return
-
-    pool = ConnectionPool(dsn=dsn, max_db_pool_size=2)
+    if config.postgres_db not in ["context_bridge_dev", "context_bridge"]:
+        print(f"❌ Reset only allowed in development databases. Current: {config.postgres_db}")
+        return False
 
     try:
-        conn = await pool.connection()
-
-        # Drop tables in reverse dependency order
-        tables_to_drop = ["chunks", "page_group_members", "page_groups", "pages", "documents"]
+        async with manager.connection() as conn:
+            # Drop tables in reverse dependency order
+            tables_to_drop = [
+                "chunks",
+                "page_group_members",
+                "page_groups",
+                "pages",
+                "documents",
+            ]
         print("\n🗑️  Dropping tables...")
 
         for table in tables_to_drop:
@@ -149,27 +141,23 @@ async def reset_database():
         print("\n✅ Database reset completed!")
 
     finally:
-        pool.close()
+        await manager.close()
+
+    return True
 
 
 async def run_migrations():
     """Run database migrations for schema changes."""
     config = get_config()
-
-    # Build DSN
-    dsn = (
-        f"postgresql://{config.postgres_user}:{config.postgres_password}"
-        f"@{config.postgres_host}:{config.postgres_port}/{config.postgres_db}"
-    )
+    manager = PostgreSQLManager(config)
+    await manager.initialize()
 
     print(f"🔄 Running migrations on: {config.postgres_db}")
-    pool = ConnectionPool(dsn=dsn, max_db_pool_size=2)
 
     try:
-        conn = await pool.connection()
-
-        # Check if we need to add any missing columns or indexes
-        print("\n🔍 Checking for missing schema elements...")
+        async with manager.connection() as conn:
+            # Check if we need to add any missing columns or indexes
+            print("\n🔍 Checking for missing schema elements...")
 
         # Example migration: Add metadata column to documents if missing
         try:
@@ -194,28 +182,22 @@ async def run_migrations():
         print("\n✅ Migrations completed!")
 
     finally:
-        pool.close()
+        await manager.close()
 
 
 async def init_postgresql():
     """Initialize PostgreSQL schema."""
     config = get_config()
-
-    # Build DSN
-    dsn = (
-        f"postgresql://{config.postgres_user}:{config.postgres_password}"
-        f"@{config.postgres_host}:{config.postgres_port}/{config.postgres_db}"
-    )
+    manager = PostgreSQLManager(config)
+    await manager.initialize()
 
     print(f"🔗 Connecting to PostgreSQL: {config.postgres_db}")
-    pool = ConnectionPool(dsn=dsn, max_db_pool_size=2)
 
     try:
-        conn = await pool.connection()
+        async with manager.connection() as conn:
+            print("\n🏗️  Initializing PostgreSQL schema...")
 
-        print("\n🏗️  Initializing PostgreSQL schema...")
-
-        # Ensure extensions exist
+            # Ensure extensions exist
         print("\n🔧 Ensuring extensions...")
         extensions = [
             ("vector", "Vector similarity search"),
@@ -278,12 +260,20 @@ async def init_postgresql():
                 await conn.execute(statement)
                 # Extract table/object name for logging
                 if "CREATE TABLE" in statement:
-                    table_name = statement.split("CREATE TABLE")[1].split("(")[0].strip().split()[0]
+                    if "IF NOT EXISTS" in statement:
+                        table_name = (
+                            statement.split("CREATE TABLE IF NOT EXISTS")[1].split("(")[0].strip()
+                        )
+                    else:
+                        table_name = statement.split("CREATE TABLE")[1].split("(")[0].strip()
                     print(f"   ✅ Table: {table_name}")
                 elif "CREATE INDEX" in statement:
-                    index_name = (
-                        statement.split("CREATE INDEX")[1].split("ON")[0].strip().split()[0]
-                    )
+                    if "IF NOT EXISTS" in statement:
+                        index_name = (
+                            statement.split("CREATE INDEX IF NOT EXISTS")[1].split("ON")[0].strip()
+                        )
+                    else:
+                        index_name = statement.split("CREATE INDEX")[1].split("ON")[0].strip()
                     print(f"   ✅ Index: {index_name}")
                 elif "CREATE TRIGGER" in statement:
                     trigger_name = statement.split("CREATE TRIGGER")[1].split("BEFORE")[0].strip()
@@ -296,6 +286,9 @@ async def init_postgresql():
                 elif "CREATE OR REPLACE VIEW" in statement or "CREATE VIEW" in statement:
                     view_name = statement.split("VIEW")[1].split("AS")[0].strip()
                     print(f"   ✅ View: {view_name}")
+                elif "DROP TRIGGER" in statement:
+                    trigger_name = statement.split("DROP TRIGGER")[1].split("ON")[0].strip()
+                    print(f"   ✅ Drop Trigger: {trigger_name}")
             except Exception as e:
                 print(f"   ❌ Error in statement {i}: {e}")
                 print(f"      Statement: {statement[:100]}...")
@@ -310,7 +303,7 @@ async def init_postgresql():
         raise
 
     finally:
-        pool.close()
+        await manager.close()
 
 
 async def main():
@@ -351,8 +344,12 @@ async def main():
                 if confirm != "yes":
                     print("Reset cancelled.")
                     return
-            await reset_database()
-            print("\n✅ Database reset completed!")
+            success = await reset_database()
+            if success:
+                print("\n✅ Database reset completed!")
+            else:
+                print("\n❌ Database reset failed!")
+                sys.exit(1)
 
         elif args.action == "migrate":
             await run_migrations()

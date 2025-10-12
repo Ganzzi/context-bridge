@@ -17,7 +17,9 @@ import sys
 from pathlib import Path
 
 # Add the project root to Python path
-sys.path.insert(0, str(Path(__file__).parent))
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+sys.path.insert(0, str(project_root))
 
 from context_bridge.config import get_config
 from context_bridge.database.postgres_manager import PostgreSQLManager

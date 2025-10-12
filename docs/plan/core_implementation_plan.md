@@ -173,7 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks USING vchord_bm25(bm25_vect
 CREATE OR REPLACE FUNCTION generate_bm25_vector()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.bm25_vector := bm25_tokenize_text(NEW.content);
+    NEW.bm25_vector := tokenize(NEW.content, 'bert');
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -182,6 +182,7 @@ CREATE TRIGGER chunks_bm25_trigger
 BEFORE INSERT OR UPDATE OF content ON chunks
 FOR EACH ROW
 EXECUTE FUNCTION generate_bm25_vector();
+
 
 -- Trigger: Update documents.updated_at
 CREATE OR REPLACE FUNCTION update_document_timestamp()
