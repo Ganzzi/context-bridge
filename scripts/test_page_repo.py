@@ -228,18 +228,18 @@ class PageRepoTester:
 
         try:
             # Test single status update
-            success = await self.page_repo.update_status(page_ids[0], "grouped")
+            success = await self.page_repo.update_status(page_ids[0], "chunked")
             if success:
-                print(f"   ✅ Updated page {page_ids[0]} status to 'grouped'")
+                print(f"   ✅ Updated page {page_ids[0]} status to 'chunked'")
             else:
                 print(f"   ❌ Failed to update page {page_ids[0]} status")
                 return False
 
             # Verify status was updated
             page = await self.page_repo.get_by_id(page_ids[0])
-            if page and page.status != "grouped":
+            if page and page.status != "chunked":
                 print(
-                    f"   ❌ Status not updated correctly: got '{page.status}', expected 'grouped'"
+                    f"   ❌ Status not updated correctly: got '{page.status}', expected 'chunked'"
                 )
                 return False
 

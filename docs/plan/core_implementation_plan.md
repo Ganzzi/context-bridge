@@ -1,8 +1,8 @@
 # Context Bridge - Core Implementation Plan
 
-**Version:** 1.0  
-**Last Updated:** October 11, 2025  
-**Status:** Active Implementation - Phase 3.2 Completed
+**Version:** 2.0  
+**Last Updated:** October 12, 2025  
+**Status:** Active Implementation - Phase 3 Completed, Architecture Revision
 
 ---
 
@@ -16,8 +16,15 @@ This document outlines the complete implementation plan for the **Context Bridge
 - ✅ Repository layer (data access)
 - ✅ Service layer (business logic)
 - ✅ Complete crawling workflow
+- 🔄 Unified API via ContextBridge class
 - ❌ MCP server (separate phase)
 - ❌ Streamlit UI (separate phase)
+
+**Architecture Changes (v2.0):**
+- **Removed:** Page grouping concept (page_groups, page_group_members tables, GroupRepository)
+- **Simplified:** Direct page-to-chunk workflow without intermediate grouping
+- **Added:** DocManager service for high-level document operations
+- **Added:** ContextBridge class as unified API entry point
 
 ---
 
@@ -27,11 +34,11 @@ This document outlines the complete implementation plan for the **Context Bridge
 
 1. **Enable intelligent documentation crawling** with automatic type detection (webpages, sitemaps, text files)
 2. **Store raw crawled content** with deduplication and metadata tracking
-3. **Provide manual page organization** with size-constrained grouping
-4. **Implement smart Markdown chunking** that preserves code blocks and structure
-5. **Generate and store embeddings** with dual vector + BM25 indexing
-6. **Enable hybrid search** combining vector similarity and BM25 full-text search
-7. **Support document versioning** for multiple versions of the same documentation
+3. **Implement smart Markdown chunking** that preserves code blocks and structure with size validation
+4. **Generate and store embeddings** with dual vector + BM25 indexing
+5. **Enable hybrid search** combining vector similarity and BM25 full-text search
+6. **Support document versioning** for multiple versions of the same documentation
+7. **Provide simple, unified API** through ContextBridge class for easy integration
 
 ### Success Criteria
 
@@ -41,6 +48,7 @@ This document outlines the complete implementation plan for the **Context Bridge
 - [ ] Support concurrent operations with connection pooling
 - [ ] Maintain type safety throughout with Pydantic models
 - [ ] Provide comprehensive test coverage (>80%)
+- [ ] Simple API with clear documentation for end users
 
 ---
 
@@ -51,33 +59,42 @@ This document outlines the complete implementation plan for the **Context Bridge
 │                    Layer Architecture                        │
 └─────────────────────────────────────────────────────────────┘
 
-Layer 1: Configuration
+Layer 1: Public API
+└── core.py (ContextBridge class - unified entry point)
+
+Layer 2: Configuration
 ├── config.py (Pydantic models, environment variables)
 
-Layer 2: Database Foundation
+Layer 3: Database Foundation
 ├── postgres_manager.py (Connection pooling, context managers)
 ├── init_databases.py (Schema initialization)
 └── schema/extensions.sql (SQL schema definitions)
 
-Layer 3: Repository Layer (Data Access)
+Layer 4: Repository Layer (Data Access)
 ├── document_repository.py (CRUD for documents)
 ├── page_repository.py (CRUD for crawled pages)
-├── group_repository.py (Page grouping logic)
 └── chunk_repository.py (Chunk storage and hybrid search)
 
-Layer 4: Service Layer (Business Logic)
+Layer 5: Service Layer (Business Logic)
+├── doc_manager.py (High-level document operations)
+├── search_service.py (Orchestrate hybrid search)
 ├── url_service.py (URL parsing and type detection)
-├── crawling_service.py (Orchestrate crawling workflow)
+├── crawling_service.py (Web crawling workflow)
 ├── chunking_service.py (Smart Markdown chunking)
-├── embedding.py (Generate embeddings via Ollama/Gemini)
-└── search_service.py (Orchestrate hybrid search)
+└── embedding.py (Generate embeddings via Ollama/Gemini)
 
-Layer 5: External Dependencies
+Layer 6: External Dependencies
 ├── PSQLPy (PostgreSQL driver)
 ├── Crawl4AI (Web crawling)
 ├── Ollama/Gemini (Embeddings)
 └── PostgreSQL Extensions (pgvector, vchord_bm25)
 ```
+
+**Key Architecture Changes:**
+- **Simplified Workflow:** Pages → Chunks (no intermediate grouping)
+- **DocManager:** Orchestrates document-level operations (crawl, chunk, manage pages)
+- **ContextBridge:** Single entry point for all user-facing operations
+- **Direct Chunking:** Users select page IDs, content is combined and validated, then chunked
 
 ---
 
@@ -120,40 +137,21 @@ CREATE TABLE IF NOT EXISTS pages (
     content_hash TEXT NOT NULL,
     content_length INTEGER GENERATED ALWAYS AS (length(content)) STORED,
     crawled_at TIMESTAMPTZ DEFAULT NOW(),
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'grouped', 'deleted')),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'chunked', 'deleted')),
     metadata JSONB DEFAULT '{}'::jsonb
-);
-
--- Table: page_groups (manual organization)
-CREATE TABLE IF NOT EXISTS page_groups (
-    id SERIAL PRIMARY KEY,
-    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    name TEXT,
-    total_size INTEGER,
-    page_count INTEGER,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    status TEXT DEFAULT 'eligible' CHECK (status IN ('eligible', 'processed'))
-);
-
--- Table: page_group_members (many-to-many)
-CREATE TABLE IF NOT EXISTS page_group_members (
-    group_id INTEGER NOT NULL REFERENCES page_groups(id) ON DELETE CASCADE,
-    page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-    added_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (group_id, page_id)
 );
 
 -- Table: chunks (embedded content)
 CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    group_id INTEGER REFERENCES page_groups(id) ON DELETE SET NULL,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
+    source_page_ids INTEGER[] NOT NULL, -- Array of page IDs used to create this chunk
     embedding VECTOR(768), -- Dimension must match config
     bm25_vector bm25vector, -- Auto-generated by trigger
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(document_id, group_id, chunk_index)
+    UNIQUE(document_id, chunk_index)
 );
 
 -- Indexes for performance
@@ -161,11 +159,8 @@ CREATE INDEX IF NOT EXISTS idx_pages_document ON pages(document_id);
 CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status);
 CREATE INDEX IF NOT EXISTS idx_pages_hash ON pages(content_hash);
 
-CREATE INDEX IF NOT EXISTS idx_groups_document ON page_groups(document_id);
-CREATE INDEX IF NOT EXISTS idx_groups_status ON page_groups(status);
-
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_group ON chunks(group_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_source_pages ON chunks USING GIN(source_page_ids);
 CREATE INDEX IF NOT EXISTS idx_chunks_vector ON chunks USING vchord(embedding);
 CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks USING vchord_bm25 (bm25_vector);
 
@@ -182,7 +177,6 @@ CREATE TRIGGER chunks_bm25_trigger
 BEFORE INSERT OR UPDATE OF content ON chunks
 FOR EACH ROW
 EXECUTE FUNCTION generate_bm25_vector();
-
 
 -- Trigger: Update documents.updated_at
 CREATE OR REPLACE FUNCTION update_document_timestamp()
@@ -204,10 +198,20 @@ FOR EACH ROW
 EXECUTE FUNCTION update_document_timestamp();
 ```
 
+**Schema Changes from v1.0:**
+- **Removed:** `page_groups` and `page_group_members` tables
+- **Updated:** `pages.status` changed from 'grouped' to 'chunked'
+- **Updated:** `chunks` table:
+  - Removed `group_id` column
+  - Added `source_page_ids` INTEGER[] to track which pages were combined
+  - Simplified UNIQUE constraint to (document_id, chunk_index)
+
 **Tasks:**
 - [x] Review existing `extensions.sql`
-- [x] Add missing tables (page_groups, page_group_members)
-- [x] Add comprehensive indexes
+- [ ] Remove page_groups and page_group_members tables
+- [ ] Update chunks table schema
+- [ ] Update page status constraints
+- [ ] Add GIN index for source_page_ids array
 - [x] Add triggers for bm25_vector generation
 - [x] Add constraints and validation
 
@@ -295,364 +299,99 @@ async def reset_database():
 
 ---
 
-### Phase 2: Repository Layer 🗄️ (Priority: Critical)
+### Phase 2: Repository Layer 🗄️ (Priority: Critical) ✅ **COMPLETED**
 
 **Goal:** Create type-safe data access layer with PSQLPy
 
-#### 2.1 Document Repository
+**Status:** Phase 2 completed with revised architecture (no GroupRepository)
+
+#### 2.1 Document Repository ✅
 
 **File:** `context_bridge/database/repositories/document_repository.py`
 
-**Implementation:**
-
-```python
-from typing import Optional, List
-from pydantic import BaseModel, Field
-from datetime import datetime
-from psqlpy import Connection
-
-class Document(BaseModel):
-    """Document model."""
-    id: int
-    name: str
-    version: str
-    source_url: Optional[str]
-    description: Optional[str]
-    metadata: dict
-    created_at: datetime
-    updated_at: datetime
-
-class DocumentRepository:
-    """Repository for document operations."""
-    
-    def __init__(self, connection: Connection):
-        self.conn = connection
-    
-    async def create(
-        self,
-        name: str,
-        version: str,
-        source_url: Optional[str] = None,
-        description: Optional[str] = None,
-        metadata: Optional[dict] = None
-    ) -> int:
-        """Create a new document and return its ID."""
-        
-    async def get_by_id(self, doc_id: int) -> Optional[Document]:
-        """Get document by ID."""
-        
-    async def get_by_name_version(self, name: str, version: str) -> Optional[Document]:
-        """Get document by name and version."""
-        
-    async def find_by_query(
-        self,
-        query: str,
-        limit: int = 10
-    ) -> List[Document]:
-        """Find documents by text query (searches name, description)."""
-        
-    async def list_all(
-        self,
-        offset: int = 0,
-        limit: int = 100
-    ) -> List[Document]:
-        """List all documents with pagination."""
-        
-    async def list_versions(self, name: str) -> List[str]:
-        """Get all versions of a document."""
-        
-    async def update(
-        self,
-        doc_id: int,
-        **fields
-    ) -> bool:
-        """Update document fields."""
-        
-    async def delete(self, doc_id: int) -> bool:
-        """Delete document and cascade to all related data."""
-```
-
-**Tasks:**
-- [x] Implement all CRUD methods
-- [x] Add query builder for find_by_query
-- [x] Add proper error handling
-- [x] Add dataclass to/from row conversion
-- [x] Write comprehensive unit tests with mocks
-- [x] Write integration tests with test database
-
+**Status:** ✅ **COMPLETED**  
 **Dependencies:** Phase 1.1, 1.2  
 **Testing:** 15+ unit tests, 5+ integration tests
 
 ---
 
-#### 2.2 Page Repository
+#### 2.2 Page Repository ✅
 
 **File:** `context_bridge/database/repositories/page_repository.py`
 
-**Implementation:**
+**Updates Required:**
+- [ ] Update status values from 'grouped' to 'chunked'
+- [ ] Add method to get combined content for multiple page IDs
+- [ ] Add method to validate total size of selected pages
+
+**New Methods Needed:**
 
 ```python
-from typing import Optional, List, Set
-from pydantic import BaseModel, Field
-from datetime import datetime
-from psqlpy import Connection
+async def get_combined_content(
+    self,
+    page_ids: List[int],
+    separator: str = "\n\n---\n\n"
+) -> str:
+    """
+    Get combined content of multiple pages.
+    Pages are ordered by ID and joined with separator.
+    """
 
-class Page(BaseModel):
-    """Page model."""
-    id: int
-    document_id: int
-    url: str
-    content: str
-    content_hash: str
-    content_length: int
-    crawled_at: datetime
-    status: str  # pending, grouped, deleted
-    metadata: dict
-
-class PageRepository:
-    """Repository for page operations."""
-    
-    def __init__(self, connection: Connection):
-        self.conn = connection
-    
-    async def create(
-        self,
-        document_id: int,
-        url: str,
-        content: str,
-        content_hash: str,
-        metadata: Optional[dict] = None
-    ) -> int:
-        """Create a page. Returns ID or existing ID if duplicate URL."""
-        
-    async def get_by_id(self, page_id: int) -> Optional[Page]:
-        """Get page by ID."""
-        
-    async def get_by_url(self, url: str) -> Optional[Page]:
-        """Get page by URL."""
-        
-    async def list_by_document(
-        self,
-        document_id: int,
-        status: Optional[str] = None,
-        offset: int = 0,
-        limit: int = 100
-    ) -> List[Page]:
-        """List pages for a document, optionally filtered by status."""
-        
-    async def count_by_document(
-        self,
-        document_id: int,
-        status: Optional[str] = None
-    ) -> int:
-        """Count pages for a document."""
-        
-    async def update_status(
-        self,
-        page_id: int,
-        status: str
-    ) -> bool:
-        """Update page status."""
-        
-    async def update_status_bulk(
-        self,
-        page_ids: List[int],
-        status: str
-    ) -> int:
-        """Update status for multiple pages. Returns count updated."""
-        
-    async def delete(self, page_id: int) -> bool:
-        """Soft delete (mark as deleted)."""
-        
-    async def delete_bulk(self, page_ids: List[int]) -> int:
-        """Soft delete multiple pages. Returns count deleted."""
-        
-    async def check_duplicates(
-        self,
-        content_hashes: List[str]
-    ) -> Set[str]:
-        """Check which content hashes already exist. Returns set of existing hashes."""
+async def validate_pages_for_chunking(
+    self,
+    page_ids: List[int],
+    min_size: Optional[int] = None,
+    max_size: Optional[int] = None
+) -> Tuple[bool, Optional[str], int]:
+    """
+    Validate if pages can be chunked together.
+    Checks:
+    - All pages exist and belong to same document
+    - All pages have status 'pending'
+    - Total size is within bounds
+    Returns: (is_valid, error_message, total_size)
+    """
 ```
 
-**Tasks:**
-- [x] Implement all CRUD methods
-- [x] Add bulk operations for efficiency
-- [x] Add deduplication logic
-- [x] Add status transition validation
-- [x] Write unit tests
-- [x] Write integration tests
-
+**Status:** ✅ **BASE COMPLETED**, Updates pending  
 **Dependencies:** Phase 2.1  
 **Testing:** 20+ unit tests, 8+ integration tests
 
 ---
 
-#### 2.3 Group Repository
-
-**File:** `context_bridge/database/repositories/group_repository.py`
-
-**Implementation:**
-
-```python
-from typing import List, Optional, Tuple
-from pydantic import BaseModel, Field
-from datetime import datetime
-from psqlpy import Connection
-
-class PageGroup(BaseModel):
-    """Page group model."""
-    id: int
-    document_id: int
-    name: Optional[str]
-    total_size: int
-    page_count: int
-    created_at: datetime
-    status: str  # eligible, processed
-
-class GroupWithPages(BaseModel):
-    """Group with its member pages."""
-    group: PageGroup
-    page_ids: List[int]
-
-class GroupRepository:
-    """Repository for page group operations."""
-    
-    def __init__(self, connection: Connection):
-        self.conn = connection
-    
-    async def create_group(
-        self,
-        document_id: int,
-        page_ids: List[int],
-        name: Optional[str] = None
-    ) -> int:
-        """
-        Create a group from pages.
-        Validates:
-        - All pages belong to the same document
-        - All pages have status 'pending'
-        - Updates pages to status 'grouped'
-        Returns group ID.
-        """
-        
-    async def get_by_id(self, group_id: int) -> Optional[PageGroup]:
-        """Get group by ID."""
-        
-    async def get_with_pages(self, group_id: int) -> Optional[GroupWithPages]:
-        """Get group with its member page IDs."""
-        
-    async def list_by_document(
-        self,
-        document_id: int,
-        status: Optional[str] = None,
-        offset: int = 0,
-        limit: int = 100
-    ) -> List[PageGroup]:
-        """List groups for a document."""
-        
-    async def get_eligible_groups(
-        self,
-        document_id: int,
-        min_size: Optional[int] = None,
-        max_size: Optional[int] = None
-    ) -> List[PageGroup]:
-        """
-        Get groups eligible for chunking.
-        Filters by status='eligible' and optional size constraints.
-        """
-        
-    async def get_group_content(self, group_id: int) -> str:
-        """
-        Get combined content of all pages in group.
-        Pages are ordered by ID and joined with '\\n\\n---\\n\\n'.
-        """
-        
-    async def update_status(
-        self,
-        group_id: int,
-        status: str
-    ) -> bool:
-        """Update group status."""
-        
-    async def ungroup(self, group_id: int) -> bool:
-        """
-        Dissolve a group:
-        - Set member pages back to 'pending'
-        - Delete group
-        Returns True if successful.
-        """
-        
-    async def delete(self, group_id: int) -> bool:
-        """Delete group (cascades to members via FK)."""
-        
-    async def validate_group_constraints(
-        self,
-        page_ids: List[int],
-        min_size: Optional[int] = None,
-        max_size: Optional[int] = None
-    ) -> Tuple[bool, Optional[str], int]:
-        """
-        Validate if pages can form a valid group.
-        Returns: (is_valid, error_message, total_size)
-        """
-```
-
-**Tasks:**
-- [x] Implement group creation with validation
-- [x] Implement content concatenation logic
-- [x] Add transaction support for atomic operations
-- [x] Add constraint validation
-- [x] Write unit tests
-- [x] Write integration tests
-
-**Status:** ✅ **COMPLETED**  
-**Dependencies:** Phase 2.2  
-**Testing:** 24 unit tests, 10+ integration tests
-
----
-
-#### 2.4 Chunk Repository
+#### 2.3 Chunk Repository ✅
 
 **File:** `context_bridge/database/repositories/chunk_repository.py`
 
-**Implementation:**
+**Updates Required:**
+- [ ] Remove `group_id` parameter from create methods
+- [ ] Add `source_page_ids` parameter to create methods
+- [ ] Update search methods to work without groups
+- [ ] Remove `list_by_group` method
+- [ ] Add `list_by_pages` method to find chunks created from specific pages
+
+**Updated Interface:**
 
 ```python
-from typing import List, Optional
-from pydantic import BaseModel, Field
-from datetime import datetime
-from psqlpy.extra_types import PgVector
-
-from context_bridge.database.postgres_manager import PostgreSQLManager
-
 class Chunk(BaseModel):
     """Chunk model."""
     id: int
     document_id: int
-    group_id: Optional[int]
     chunk_index: int
     content: str
+    source_page_ids: List[int]  # Changed from group_id
     embedding: List[float]
     created_at: datetime
-
-class SearchResult(BaseModel):
-    """Search result with relevance score."""
-    chunk: Chunk
-    score: float
-    rank: int
 
 class ChunkRepository:
     """Repository for chunk operations with hybrid search."""
     
-    def __init__(self, db_manager: PostgreSQLManager):
-        self.db_manager = db_manager
-    
     async def create(
         self,
         document_id: int,
-        group_id: Optional[int],
         chunk_index: int,
         content: str,
+        source_page_ids: List[int],  # New parameter
         embedding: List[float]
     ) -> int:
         """
@@ -662,48 +401,24 @@ class ChunkRepository:
         
     async def create_batch(
         self,
-        chunks: List[dict]
+        chunks: List[dict]  # Each dict includes source_page_ids
     ) -> List[int]:
         """Create multiple chunks efficiently. Returns list of IDs."""
         
-    async def get_by_id(self, chunk_id: int) -> Optional[Chunk]:
-        """Get chunk by ID."""
-        
-    async def list_by_document(
+    async def list_by_pages(
         self,
-        document_id: int,
-        offset: int = 0,
-        limit: int = 100
+        page_ids: List[int]
     ) -> List[Chunk]:
-        """List chunks for a document."""
+        """Get all chunks created from specific pages."""
         
-    async def list_by_group(
-        self,
-        group_id: int
-    ) -> List[Chunk]:
-        """Get all chunks for a group, ordered by chunk_index."""
-        
-    async def count_by_document(self, document_id: int) -> int:
-        """Count chunks for a document."""
-        
-    async def vector_search(
-        self,
-        document_id: int,
-        query_embedding: List[float],
-        limit: int = 10,
-        similarity_threshold: float = 0.7
-    ) -> List[SearchResult]:
-        """
-        Vector similarity search using pgvector.
-        Returns chunks ordered by cosine similarity.
-        """
-        
-    async def bm25_search(
-        self,
-        document_id: int,
-        query: str,
-        limit: int = 10
-    ) -> List[SearchResult]:
+    # ... rest of search methods remain the same
+```
+
+**Status:** ✅ **BASE COMPLETED**, Updates pending  
+**Dependencies:** Phase 2.2  
+**Testing:** 25+ unit tests, 15+ integration tests
+
+---
         """
         BM25 full-text search using vchord_bm25.
         Returns chunks ordered by BM25 relevance.
@@ -1060,59 +775,86 @@ class SearchService:
 
 ---
 
-### Phase 4: Workflow Integration 🔄 (Priority: High)
+### Phase 4: High-Level Services & Public API 🚀 (Priority: High) **NEW**
 
-**Goal:** Create end-to-end workflows
+**Goal:** Create DocManager for document operations and ContextBridge as unified public API
 
-#### 4.1 Complete Crawling Workflow
+#### 4.1 Document Manager Service (NEW)
 
-**File:** `context_bridge/workflows/crawling_workflow.py`
+**File:** `context_bridge/service/doc_manager.py`
+
+**Purpose:** High-level orchestration for document operations
 
 **Implementation:**
 
 ```python
-from typing import Optional
+from typing import List, Optional
+from pydantic import BaseModel
 import logging
+import hashlib
 
 logger = logging.getLogger(__name__)
 
-class CrawlWorkflowResult(BaseModel):
-    """Result of complete crawl workflow."""
+class CrawlAndStoreResult(BaseModel):
+    """Result of crawl and store operation."""
     document_id: int
+    document_name: str
+    document_version: str
     pages_crawled: int
     pages_stored: int
     duplicates_skipped: int
     errors: int
 
-class CrawlingWorkflow:
-    """Orchestrate complete crawling workflow."""
+class ChunkProcessingResult(BaseModel):
+    """Result of chunking operation."""
+    document_id: int
+    pages_processed: int
+    chunks_created: int
+    errors: int
+
+class PageInfo(BaseModel):
+    """Simplified page information for listing."""
+    id: int
+    url: str
+    content_length: int
+    status: str
+    crawled_at: datetime
+
+class DocManager:
+    """High-level document management service."""
     
     def __init__(
         self,
         db_manager: PostgreSQLManager,
         crawling_service: CrawlingService,
-        config: CrawlConfig
+        chunking_service: ChunkingService,
+        embedding_service: EmbeddingService,
+        config: Config
     ):
         self.db_manager = db_manager
         self.crawling_service = crawling_service
+        self.chunking_service = chunking_service
+        self.embedding_service = embedding_service
         self.config = config
-    
-    async def crawl_and_store_documentation(
+        
+    async def crawl_and_store(
         self,
         name: str,
         version: str,
         source_url: str,
-        description: Optional[str] = None
-    ) -> CrawlWorkflowResult:
+        description: Optional[str] = None,
+        max_depth: Optional[int] = None
+    ) -> CrawlAndStoreResult:
         """
-        Complete workflow:
-        1. Create or get document
-        2. Crawl source URL
-        3. Store pages (skip duplicates)
-        4. Return summary
-        """
+        Crawl documentation and store pages.
         
-        logger.info(f"Starting crawl workflow for {name} v{version}")
+        Workflow:
+        1. Create or get document
+        2. Crawl source URL with optional depth override
+        3. Store pages (skip duplicates)
+        4. Return detailed results
+        """
+        logger.info(f"Starting crawl_and_store for {name} v{version} from {source_url}")
         
         async with self.db_manager.connection() as conn:
             doc_repo = DocumentRepository(conn)
@@ -1130,10 +872,12 @@ class CrawlingWorkflow:
             else:
                 doc_id = doc.id
             
-            # Crawl
+            # Crawl with optional depth override
             async with AsyncWebCrawler(verbose=True) as crawler:
                 crawl_result = await self.crawling_service.crawl_webpage(
-                    crawler, source_url
+                    crawler,
+                    source_url,
+                    depth=max_depth
                 )
             
             # Store pages
@@ -1143,7 +887,6 @@ class CrawlingWorkflow:
             
             for page in crawl_result.results:
                 try:
-                    # Check for duplicate
                     content_hash = hashlib.sha256(page.markdown.encode()).hexdigest()
                     existing = await page_repo.get_by_url(page.url)
                     
@@ -1168,160 +911,577 @@ class CrawlingWorkflow:
                 f"{duplicates} duplicates, {errors} errors"
             )
             
-            return CrawlWorkflowResult(
+            return CrawlAndStoreResult(
                 document_id=doc_id,
+                document_name=name,
+                document_version=version,
                 pages_crawled=len(crawl_result.results),
                 pages_stored=stored,
                 duplicates_skipped=duplicates,
                 errors=errors
             )
-```
-
-**Tasks:**
-- [ ] Implement complete workflow method
-- [ ] Add transaction support
-- [ ] Add progress reporting
-- [ ] Add error recovery
-- [ ] Write integration tests
-
-**Dependencies:** Phase 2, 3  
-**Testing:** 10+ integration tests
-
----
-
-#### 4.2 Chunking Workflow
-
-**File:** `context_bridge/workflows/chunking_workflow.py`
-
-**Implementation:**
-
-```python
-from typing import Optional, List
-import logging
-
-logger = logging.getLogger(__name__)
-
-class ChunkWorkflowResult(BaseModel):
-    """Result of chunking workflow."""
-    document_id: int
-    groups_processed: int
-    chunks_created: int
-    errors: int
-
-class ChunkingWorkflow:
-    """Orchestrate chunking and embedding workflow."""
     
-    def __init__(
-        self,
-        db_manager: PostgreSQLManager,
-        chunking_service: ChunkingService,
-        embedding_service: EmbeddingService,
-        chunk_size: int = 2000
-    ):
-        self.db_manager = db_manager
-        self.chunking_service = chunking_service
-        self.embedding_service = embedding_service
-        self.chunk_size = chunk_size
-    
-    async def process_group(
-        self,
-        group_id: int
-    ) -> int:
-        """
-        Process a single group:
-        1. Get group content
-        2. Chunk content
-        3. Generate embeddings
-        4. Store chunks
-        5. Mark group as processed
-        Returns number of chunks created.
-        """
-        
-    async def process_document(
+    async def list_pages(
         self,
         document_id: int,
-        group_status_filter: str = 'eligible'
-    ) -> ChunkWorkflowResult:
+        status: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 100
+    ) -> List[PageInfo]:
         """
-        Process all eligible groups for a document.
-        """
+        List pages for a document with pagination.
         
-        logger.info(f"Starting chunking workflow for document {document_id}")
+        Args:
+            document_id: Document ID
+            status: Optional status filter ('pending', 'chunked', 'deleted')
+            offset: Pagination offset
+            limit: Maximum results
+        """
+        async with self.db_manager.connection() as conn:
+            page_repo = PageRepository(conn)
+            pages = await page_repo.list_by_document(
+                document_id,
+                status=status,
+                offset=offset,
+                limit=limit
+            )
+            
+            return [
+                PageInfo(
+                    id=p.id,
+                    url=p.url,
+                    content_length=p.content_length,
+                    status=p.status,
+                    crawled_at=p.crawled_at
+                )
+                for p in pages
+            ]
+    
+    async def delete_page(
+        self,
+        page_id: int
+    ) -> bool:
+        """
+        Delete a page (soft delete - marks as 'deleted').
+        
+        Args:
+            page_id: Page ID to delete
+            
+        Returns:
+            True if successful
+        """
+        async with self.db_manager.connection() as conn:
+            page_repo = PageRepository(conn)
+            return await page_repo.delete(page_id)
+    
+    async def process_chunking(
+        self,
+        document_id: int,
+        page_ids: List[int],
+        chunk_size: Optional[int] = None
+    ) -> ChunkProcessingResult:
+        """
+        Process pages for chunking and embedding.
+        
+        Workflow:
+        1. Validate pages (same document, status='pending', size constraints)
+        2. Get combined content
+        3. Chunk content
+        4. Generate embeddings (batch)
+        5. Store chunks with source_page_ids
+        6. Update page status to 'chunked'
+        
+        Args:
+            document_id: Document ID
+            page_ids: List of page IDs to process
+            chunk_size: Optional chunk size override
+            
+        Returns:
+            ChunkProcessingResult with counts and errors
+        """
+        logger.info(f"Starting process_chunking for doc {document_id}, {len(page_ids)} pages")
+        
+        chunk_size = chunk_size or self.config.chunk_size
+        min_size = self.config.min_combined_content_size
+        max_size = self.config.max_combined_content_size
         
         async with self.db_manager.connection() as conn:
-            group_repo = GroupRepository(conn)
-            chunk_repo = ChunkRepository(conn)
+            page_repo = PageRepository(conn)
+            chunk_repo = ChunkRepository(self.db_manager)
             
-            # Get eligible groups
-            groups = await group_repo.list_by_document(
-                document_id,
-                status=group_status_filter
+            # Validate pages
+            is_valid, error_msg, total_size = await page_repo.validate_pages_for_chunking(
+                page_ids,
+                min_size=min_size,
+                max_size=max_size
             )
             
-            total_chunks = 0
+            if not is_valid:
+                raise ValueError(f"Page validation failed: {error_msg}")
+            
+            logger.info(f"Validated {len(page_ids)} pages, total size: {total_size} chars")
+            
+            # Get combined content
+            combined_content = await page_repo.get_combined_content(page_ids)
+            
+            # Chunk
+            chunks = self.chunking_service.smart_chunk_markdown(
+                combined_content,
+                chunk_size=chunk_size
+            )
+            
+            logger.info(f"Created {len(chunks)} chunks from combined content")
+            
+            # Generate embeddings in batch
+            try:
+                embeddings = await self.embedding_service.get_embeddings_batch(chunks)
+            except Exception as e:
+                logger.error(f"Error generating embeddings: {e}")
+                raise
+            
+            # Store chunks
+            chunks_created = 0
             errors = 0
             
-            for group in groups:
-                try:
-                    # Get content
-                    content = await group_repo.get_group_content(group.id)
-                    
-                    # Chunk
-                    chunks = self.chunking_service.smart_chunk_markdown(
-                        content,
-                        chunk_size=self.chunk_size
-                    )
-                    
-                    # Generate embeddings and store
-                    for i, chunk_text in enumerate(chunks):
-                        try:
-                            embedding = await self.embedding_service.get_embedding(
-                                chunk_text
-                            )
-                            
-                            await chunk_repo.create(
-                                document_id=document_id,
-                                group_id=group.id,
-                                chunk_index=i,
-                                content=chunk_text,
-                                embedding=embedding
-                            )
-                            total_chunks += 1
-                            
-                        except Exception as e:
-                            logger.error(f"Error creating chunk {i} for group {group.id}: {e}")
-                            errors += 1
-                    
-                    # Mark group as processed
-                    await group_repo.update_status(group.id, 'processed')
-                    
-                except Exception as e:
-                    logger.error(f"Error processing group {group.id}: {e}")
-                    errors += 1
+            chunk_data = []
+            for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+                chunk_data.append({
+                    'document_id': document_id,
+                    'chunk_index': i,
+                    'content': chunk_text,
+                    'source_page_ids': page_ids,
+                    'embedding': embedding
+                })
+            
+            try:
+                chunk_ids = await chunk_repo.create_batch(chunk_data)
+                chunks_created = len(chunk_ids)
+                
+                # Update page status to 'chunked'
+                await page_repo.update_status_bulk(page_ids, 'chunked')
+                
+            except Exception as e:
+                logger.error(f"Error storing chunks: {e}")
+                errors += 1
             
             logger.info(
-                f"Chunking complete: {len(groups)} groups, "
-                f"{total_chunks} chunks, {errors} errors"
+                f"Chunking complete: {chunks_created} chunks created, "
+                f"{errors} errors"
             )
             
-            return ChunkWorkflowResult(
+            return ChunkProcessingResult(
                 document_id=document_id,
-                groups_processed=len(groups),
-                chunks_created=total_chunks,
+                pages_processed=len(page_ids),
+                chunks_created=chunks_created,
                 errors=errors
             )
 ```
 
+**Configuration Updates Required:**
+
+Add to `context_bridge/config.py`:
+
+```python
+class Config(BaseModel):
+    # ... existing fields ...
+    
+    # Chunking configuration
+    chunk_size: int = Field(default=2000, description="Default chunk size for markdown chunking")
+    min_combined_content_size: int = Field(default=100, description="Minimum total size for combined page content")
+    max_combined_content_size: int = Field(default=50000, description="Maximum total size for combined page content")
+```
+
 **Tasks:**
-- [ ] Implement group processing
-- [ ] Implement document processing
-- [ ] Add batch embedding for efficiency
-- [ ] Add transaction support
-- [ ] Add error recovery
+- [ ] Implement DocManager class
+- [ ] Add configuration fields to Config
+- [ ] Implement crawl_and_store method
+- [ ] Implement list_pages method
+- [ ] Implement delete_page method
+- [ ] Implement process_chunking method with validation
+- [ ] Add comprehensive error handling
+- [ ] Write unit tests with mocked dependencies
 - [ ] Write integration tests
 
-**Dependencies:** Phase 2, 3  
-**Testing:** 8+ integration tests
+**Dependencies:** Phase 2, Phase 3  
+**Testing:** 15+ unit tests, 8+ integration tests
+
+---
+
+#### 4.2 ContextBridge Public API (NEW)
+
+**File:** `context_bridge/core.py`
+
+**Purpose:** Unified entry point for all package functionality
+
+**Implementation:**
+
+```python
+from typing import List, Optional
+from pydantic import BaseModel
+import logging
+
+from context_bridge.config import Config
+from context_bridge.database.postgres_manager import PostgreSQLManager
+from context_bridge.service.doc_manager import DocManager, CrawlAndStoreResult, ChunkProcessingResult, PageInfo
+from context_bridge.service.search_service import SearchService, ContentSearchResult
+from context_bridge.service.crawling_service import CrawlingService
+from context_bridge.service.chunking_service import ChunkingService
+from context_bridge.service.embedding import EmbeddingService
+from context_bridge.service.url_service import UrlService
+from context_bridge.database.repositories.document_repository import DocumentRepository, Document
+
+logger = logging.getLogger(__name__)
+
+class ContextBridge:
+    """
+    Unified API for Context Bridge functionality.
+    
+    This class provides a simple interface for:
+    - Crawling and storing documentation
+    - Managing pages
+    - Processing chunks with embeddings
+    - Searching documentation content
+    - Managing documents
+    
+    Example:
+        ```python
+        from context_bridge import ContextBridge
+        
+        # Initialize
+        bridge = ContextBridge()
+        await bridge.initialize()
+        
+        # Crawl documentation
+        result = await bridge.crawl_documentation(
+            name="psqlpy",
+            version="0.9.0",
+            source_url="https://psqlpy.readthedocs.io"
+        )
+        
+        # List pages
+        pages = await bridge.list_pages(result.document_id)
+        
+        # Process chunking
+        page_ids = [p.id for p in pages[:10]]
+        chunk_result = await bridge.process_pages(result.document_id, page_ids)
+        
+        # Search
+        results = await bridge.search(
+            query="connection pooling",
+            document_id=result.document_id
+        )
+        
+        # Cleanup
+        await bridge.close()
+        ```
+    """
+    
+    def __init__(self, config: Optional[Config] = None):
+        """
+        Initialize ContextBridge.
+        
+        Args:
+            config: Optional configuration. If not provided, loads from environment.
+        """
+        self.config = config or Config()
+        self._db_manager: Optional[PostgreSQLManager] = None
+        self._doc_manager: Optional[DocManager] = None
+        self._search_service: Optional[SearchService] = None
+        self._initialized = False
+        
+    async def initialize(self) -> None:
+        """
+        Initialize database connections and services.
+        Must be called before using any other methods.
+        """
+        if self._initialized:
+            logger.warning("ContextBridge already initialized")
+            return
+        
+        logger.info("Initializing ContextBridge...")
+        
+        # Initialize database
+        self._db_manager = PostgreSQLManager(self.config.postgres)
+        await self._db_manager.initialize()
+        
+        # Initialize services
+        url_service = UrlService()
+        crawl_config = CrawlConfig(
+            max_depth=self.config.crawl_max_depth,
+            max_concurrent=self.config.crawl_max_concurrent
+        )
+        crawling_service = CrawlingService(crawl_config, url_service)
+        chunking_service = ChunkingService(default_chunk_size=self.config.chunk_size)
+        embedding_service = EmbeddingService(self.config.embedding)
+        
+        # Initialize high-level services
+        self._doc_manager = DocManager(
+            db_manager=self._db_manager,
+            crawling_service=crawling_service,
+            chunking_service=chunking_service,
+            embedding_service=embedding_service,
+            config=self.config
+        )
+        
+        async with self._db_manager.connection() as conn:
+            doc_repo = DocumentRepository(conn)
+            chunk_repo = ChunkRepository(self._db_manager)
+            self._search_service = SearchService(
+                document_repo=doc_repo,
+                chunk_repo=chunk_repo,
+                embedding_service=embedding_service
+            )
+        
+        self._initialized = True
+        logger.info("ContextBridge initialized successfully")
+    
+    async def close(self) -> None:
+        """Close all connections and cleanup resources."""
+        if self._db_manager:
+            await self._db_manager.close()
+        self._initialized = False
+        logger.info("ContextBridge closed")
+    
+    def _check_initialized(self) -> None:
+        """Verify that initialize() has been called."""
+        if not self._initialized:
+            raise RuntimeError(
+                "ContextBridge not initialized. Call await bridge.initialize() first."
+            )
+    
+    # Document Operations
+    
+    async def crawl_documentation(
+        self,
+        name: str,
+        version: str,
+        source_url: str,
+        description: Optional[str] = None,
+        max_depth: Optional[int] = None
+    ) -> CrawlAndStoreResult:
+        """
+        Crawl and store documentation from a URL.
+        
+        Args:
+            name: Document name
+            version: Document version
+            source_url: URL to crawl
+            description: Optional description
+            max_depth: Optional crawl depth override (1-10)
+            
+        Returns:
+            CrawlAndStoreResult with summary
+        """
+        self._check_initialized()
+        return await self._doc_manager.crawl_and_store(
+            name=name,
+            version=version,
+            source_url=source_url,
+            description=description,
+            max_depth=max_depth
+        )
+    
+    async def list_documents(
+        self,
+        offset: int = 0,
+        limit: int = 100
+    ) -> List[Document]:
+        """
+        List all documents with pagination.
+        
+        Args:
+            offset: Pagination offset
+            limit: Maximum results
+            
+        Returns:
+            List of Document objects
+        """
+        self._check_initialized()
+        async with self._db_manager.connection() as conn:
+            doc_repo = DocumentRepository(conn)
+            return await doc_repo.list_all(offset=offset, limit=limit)
+    
+    async def get_document(
+        self,
+        name: str,
+        version: str
+    ) -> Optional[Document]:
+        """
+        Get a specific document by name and version.
+        
+        Args:
+            name: Document name
+            version: Document version
+            
+        Returns:
+            Document or None if not found
+        """
+        self._check_initialized()
+        async with self._db_manager.connection() as conn:
+            doc_repo = DocumentRepository(conn)
+            return await doc_repo.get_by_name_version(name, version)
+    
+    async def delete_document(
+        self,
+        document_id: int
+    ) -> bool:
+        """
+        Delete a document and all related data (pages, chunks).
+        
+        Args:
+            document_id: Document ID to delete
+            
+        Returns:
+            True if successful
+        """
+        self._check_initialized()
+        async with self._db_manager.connection() as conn:
+            doc_repo = DocumentRepository(conn)
+            return await doc_repo.delete(document_id)
+    
+    # Page Operations
+    
+    async def list_pages(
+        self,
+        document_id: int,
+        status: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 100
+    ) -> List[PageInfo]:
+        """
+        List pages for a document.
+        
+        Args:
+            document_id: Document ID
+            status: Optional status filter ('pending', 'chunked', 'deleted')
+            offset: Pagination offset
+            limit: Maximum results
+            
+        Returns:
+            List of PageInfo objects
+        """
+        self._check_initialized()
+        return await self._doc_manager.list_pages(
+            document_id=document_id,
+            status=status,
+            offset=offset,
+            limit=limit
+        )
+    
+    async def delete_page(
+        self,
+        page_id: int
+    ) -> bool:
+        """
+        Delete a page (soft delete).
+        
+        Args:
+            page_id: Page ID to delete
+            
+        Returns:
+            True if successful
+        """
+        self._check_initialized()
+        return await self._doc_manager.delete_page(page_id)
+    
+    # Chunking Operations
+    
+    async def process_pages(
+        self,
+        document_id: int,
+        page_ids: List[int],
+        chunk_size: Optional[int] = None
+    ) -> ChunkProcessingResult:
+        """
+        Process pages for chunking and embedding.
+        
+        Validates pages, combines content, chunks, generates embeddings,
+        and stores chunks with source page tracking.
+        
+        Args:
+            document_id: Document ID
+            page_ids: List of page IDs to process together
+            chunk_size: Optional chunk size override
+            
+        Returns:
+            ChunkProcessingResult with summary
+        """
+        self._check_initialized()
+        return await self._doc_manager.process_chunking(
+            document_id=document_id,
+            page_ids=page_ids,
+            chunk_size=chunk_size
+        )
+    
+    # Search Operations
+    
+    async def search(
+        self,
+        query: str,
+        document_id: int,
+        limit: int = 10,
+        vector_weight: Optional[float] = None,
+        bm25_weight: Optional[float] = None
+    ) -> List[ContentSearchResult]:
+        """
+        Search within document content using hybrid search.
+        
+        Args:
+            query: Search query
+            document_id: Document ID to search within
+            limit: Maximum results
+            vector_weight: Optional vector search weight (0-1)
+            bm25_weight: Optional BM25 search weight (0-1)
+            
+        Returns:
+            List of ContentSearchResult objects ranked by relevance
+        """
+        self._check_initialized()
+        return await self._search_service.search_content(
+            query=query,
+            document_id=document_id,
+            limit=limit,
+            vector_weight=vector_weight,
+            bm25_weight=bm25_weight
+        )
+    
+    async def search_across_versions(
+        self,
+        query: str,
+        document_name: str,
+        limit_per_version: int = 5
+    ) -> dict[str, List[ContentSearchResult]]:
+        """
+        Search across all versions of a document.
+        
+        Args:
+            query: Search query
+            document_name: Document name
+            limit_per_version: Maximum results per version
+            
+        Returns:
+            Dict mapping version -> list of results
+        """
+        self._check_initialized()
+        return await self._search_service.search_across_versions(
+            query=query,
+            document_name=document_name,
+            limit_per_version=limit_per_version
+        )
+```
+
+**Tasks:**
+- [ ] Implement ContextBridge class
+- [ ] Add all public methods with proper documentation
+- [ ] Add context manager support (`async with`)
+- [ ] Add initialization validation
+- [ ] Add comprehensive docstrings with examples
+- [ ] Write unit tests with mocked services
+- [ ] Write integration tests for end-to-end workflows
+- [ ] Create usage examples in docs
+
+**Dependencies:** Phase 4.1, Phase 3  
+**Testing:** 20+ unit tests, 10+ integration tests, example scripts
 
 ---
 
@@ -1487,70 +1647,138 @@ class ChunkingWorkflow:
 
 ## 📊 Progress Tracking
 
-### Overall Progress
+### Overall Progress (v2.0 Architecture)
 
 ```
-Phase 1: Database Foundation    [ ▰▰▰▰▱ ] 80%
-Phase 2: Repository Layer       [ ▰▰▰▰▱ ] 80%
-Phase 3: Service Layer          [ ▰▰▰▰▱ ] 80%
-Phase 4: Workflow Integration   [ ▱▱▱▱▱ ]  0%
-Phase 5: Testing & Docs         [ ▱▱▱▱▱ ]  0%
-Phase 6: Optimization           [ ▱▱▱▱▱ ]  0%
+Phase 1: Database Foundation          [ ▰▰▰▰▱ ] 80% - Schema update pending
+Phase 2: Repository Layer             [ ▰▰▰▰▱ ] 85% - Group removal pending
+Phase 3: Service Layer                [ ▰▰▰▰▰ ] 100% - Completed
+Phase 4: High-Level Services & API    [ ▱▱▱▱▱ ]  0% - NEW PHASE
+Phase 5: Testing & Docs               [ ▱▱▱▱▱ ]  0%
+Phase 6: Optimization                 [ ▱▱▱▱▱ ]  0%
 
-Total Progress:                 [ ▰▰▰▰▱ ] 70%
+Total Progress:                       [ ▰▰▰▱▱ ] 60%
 ```
 
-### Critical Path
+### Critical Path (Updated)
 
 ```
 Phase 1.1 → Phase 1.2 → Phase 1.3
     ↓
-Phase 2.1 → Phase 2.2 → Phase 2.3 → Phase 2.4
+Phase 2.1 → Phase 2.2 → Phase 2.3 (REMOVED) → Phase 2.4
     ↓
-Phase 3.2 → Phase 3.3 → Phase 3.4 → Phase 3.5
+Phase 3.1 → Phase 3.2 → Phase 3.3 → Phase 3.4 → Phase 3.5
     ↓
-Phase 4.1 → Phase 4.2
+Phase 4.1 (DocManager) → Phase 4.2 (ContextBridge)
     ↓
 Phase 5.1 → Phase 5.2
     ↓
 Phase 6 (Parallel optimizations)
 ```
 
+### Architectural Changes Summary
+
+**Removed:**
+- ❌ `page_groups` table
+- ❌ `page_group_members` table
+- ❌ `GroupRepository` class
+- ❌ Group-based workflow
+
+**Updated:**
+- 🔄 `chunks` table: `group_id` → `source_page_ids` array
+- 🔄 `pages.status`: 'grouped' → 'chunked'
+- 🔄 `ChunkRepository`: Updated to use source_page_ids
+- 🔄 `PageRepository`: Added content combining and validation methods
+
+**Added:**
+- ✅ `DocManager` service (high-level document operations)
+- ✅ `ContextBridge` class (unified public API)
+- ✅ Configuration fields for size validation
+- ✅ Direct page-to-chunk workflow
+
 ---
 
 ## 🎯 Next Steps
 
-### Immediate (Week 1-2)
+### Immediate (Current Sprint)
 
-1. ✅ Complete database schema (Phase 1.1)
-2. ✅ Enhance PostgreSQL manager (Phase 1.2)
-3. ✅ Update initialization script (Phase 1.3)
-4. ✅ Complete document repository (Phase 2.1)
-5. ✅ Complete page repository (Phase 2.2)
-6. ✅ Complete group repository (Phase 2.3)
-7. ✅ Complete chunk repository (Phase 2.4)
-8. ✅ Complete crawling service enhancement (Phase 3.2)
-9. ✅ Complete chunking service (Phase 3.3)
-10. ✅ Complete embedding service enhancement (Phase 3.4)
-11. ▶️ Start search service implementation (Phase 3.5)
+**Priority 1: Database Schema Update**
+- [ ] Update `context_bridge/schema/extensions.sql`:
+  - Remove `page_groups` and `page_group_members` tables
+  - Update `chunks` table schema (add `source_page_ids`, remove `group_id`)
+  - Update `pages.status` constraint
+- [ ] Run database migration script
+- [ ] Verify schema changes
 
-### Short-term (Week 3-4)
+**Priority 2: Repository Updates**
+- [ ] Update `PageRepository`:
+  - Add `get_combined_content()` method
+  - Add `validate_pages_for_chunking()` method
+  - Update status values in existing methods
+- [ ] Update `ChunkRepository`:
+  - Update `create()` and `create_batch()` signatures
+  - Remove `list_by_group()` method
+  - Add `list_by_pages()` method
+  - Update Chunk model
 
-1. Complete all repositories (Phase 2)
-2. Validate existing services (Phase 3)
-3. Implement new services (Phase 3)
+**Priority 3: Configuration**
+- [ ] Add chunking configuration fields to `Config` class:
+  - `chunk_size`
+  - `min_combined_content_size`
+  - `max_combined_content_size`
 
-### Medium-term (Week 5-8)
+### Short-term (Week 1-2)
 
-1. Build workflow integrations (Phase 4)
-2. Write comprehensive tests (Phase 5)
-3. Create API documentation (Phase 5)
+**Priority 4: DocManager Implementation**
+- [ ] Create `context_bridge/service/doc_manager.py`
+- [ ] Implement `crawl_and_store()` method
+- [ ] Implement `list_pages()` method
+- [ ] Implement `delete_page()` method
+- [ ] Implement `process_chunking()` method with validation
+- [ ] Write unit tests
 
-### Long-term (Week 9+)
+**Priority 5: ContextBridge Implementation**
+- [ ] Create `context_bridge/core.py`
+- [ ] Implement ContextBridge class with all public methods
+- [ ] Add initialization and cleanup logic
+- [ ] Add context manager support
+- [ ] Write comprehensive docstrings
+- [ ] Write unit tests
+
+### Medium-term (Week 3-4)
+
+**Priority 6: Integration Testing**
+- [ ] Write end-to-end integration tests
+- [ ] Test complete workflow: crawl → list pages → chunk → search
+- [ ] Test error handling and edge cases
+- [ ] Performance testing with real documentation
+
+**Priority 7: Documentation & Examples**
+- [ ] Create usage examples for ContextBridge
+- [ ] Update API documentation
+- [ ] Create quickstart guide
+- [ ] Add troubleshooting guide
+
+### Long-term (Week 5+)
 
 1. Performance optimization (Phase 6)
 2. Prepare for MCP server integration
 3. Prepare for Streamlit UI integration
+
+---
+
+## 🗑️ Cleanup Tasks
+
+**Files to Remove:**
+- [ ] `context_bridge/database/repositories/group_repository.py`
+- [ ] `context_bridge/workflows/` directory (if exists)
+- [ ] `tests/test_group_repository.py`
+- [ ] `scripts/test_group_repo.py`
+
+**Files to Update:**
+- [ ] Any imports of `GroupRepository`
+- [ ] Any references to `page_groups` in tests
+- [ ] Documentation mentioning grouping workflow
 
 ---
 
@@ -1627,6 +1855,46 @@ A phase is considered complete when:
 - [ ] API reference is generated
 - [ ] Example usage is provided
 - [ ] Performance metrics are met (if applicable)
+
+---
+
+## 📝 Change Log
+
+### Version 2.0 (October 12, 2025)
+
+**Major Architecture Revision:**
+
+**Removed:**
+- Page grouping concept (tables, repository, workflow)
+- `page_groups` and `page_group_members` database tables
+- `GroupRepository` class
+- Complex group-based chunking workflow
+
+**Added:**
+- `DocManager` service for high-level document operations
+- `ContextBridge` class as unified public API
+- Direct page selection for chunking workflow
+- Configuration-based size validation for combined content
+- `source_page_ids` tracking in chunks table
+
+**Simplified:**
+- Workflow: Pages → Chunks (no intermediate grouping)
+- User provides list of page IDs for chunking
+- Validation moved to repository layer
+- Single entry point via ContextBridge class
+
+**Rationale:**
+- Eliminate unnecessary complexity of page grouping
+- Provide simpler, more flexible user experience
+- Maintain all original capabilities with cleaner architecture
+- Better separation of concerns between layers
+
+### Version 1.0 (October 11, 2025)
+
+**Initial Implementation Plan:**
+- Defined 6-phase implementation approach
+- Completed Phases 1-3 (Database, Repositories, Services)
+- Established group-based workflow architecture
 
 ---
 

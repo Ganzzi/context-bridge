@@ -360,7 +360,7 @@ class TestPageRepositoryUnit:
         mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
         mock_db_manager.connection.return_value.__aexit__.return_value = None
 
-        result = await repo.update_status(page_id=1, status="grouped")
+        result = await repo.update_status(page_id=1, status="chunked")
 
         assert result is True
 
@@ -368,7 +368,7 @@ class TestPageRepositoryUnit:
         mock_conn.execute.assert_called_once()
         call_args = mock_conn.execute.call_args
         assert "UPDATE pages SET status = $1 WHERE id = $2" in call_args[0][0]
-        assert call_args[0][1] == ["grouped", 1]
+        assert call_args[0][1] == ["chunked", 1]
 
     @pytest.mark.asyncio
     async def test_update_status_no_rows_affected(self, repo, mock_db_manager):
@@ -384,7 +384,7 @@ class TestPageRepositoryUnit:
         mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
         mock_db_manager.connection.return_value.__aexit__.return_value = None
 
-        result = await repo.update_status(page_id=999, status="grouped")
+        result = await repo.update_status(page_id=999, status="chunked")
 
         assert result is False
 
@@ -410,7 +410,7 @@ class TestPageRepositoryUnit:
         mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
         mock_db_manager.connection.return_value.__aexit__.return_value = None
 
-        result = await repo.update_status_bulk(page_ids=[1, 2, 3], status="grouped")
+        result = await repo.update_status_bulk(page_ids=[1, 2, 3], status="chunked")
 
         assert result == 3
 
@@ -418,14 +418,14 @@ class TestPageRepositoryUnit:
         mock_conn.execute.assert_called_once()
         call_args = mock_conn.execute.call_args
         assert "UPDATE pages SET status = $1 WHERE id IN" in call_args[0][0]
-        assert call_args[0][1] == ["grouped", 1, 2, 3]
+        assert call_args[0][1] == ["chunked", 1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_update_status_bulk_empty_list(self, repo, mock_db_manager):
         """
         Test bulk status update with empty page ID list.
         """
-        result = await repo.update_status_bulk(page_ids=[], status="grouped")
+        result = await repo.update_status_bulk(page_ids=[], status="chunked")
 
         assert result == 0
         # Verify no database calls were made

@@ -26,7 +26,6 @@ from context_bridge.config import get_config
 from context_bridge.database.postgres_manager import PostgreSQLManager
 from context_bridge.database.repositories.document_repository import DocumentRepository
 from context_bridge.database.repositories.page_repository import PageRepository
-from context_bridge.database.repositories.group_repository import GroupRepository
 from context_bridge.database.repositories.chunk_repository import ChunkRepository
 
 
@@ -43,12 +42,11 @@ class ChunkRepoTester:
         self.manager = PostgreSQLManager(self.config)
         self.doc_repo = DocumentRepository(self.manager)
         self.page_repo = PageRepository(self.manager)
-        self.group_repo = GroupRepository(self.manager)
         self.chunk_repo = ChunkRepository(self.manager)
 
         # Test data
         self.test_doc_id = None
-        self.test_group_id = None
+        self.test_page_ids = []
         self.test_chunk_ids = []
 
     async def __aenter__(self):
@@ -97,12 +95,9 @@ class ChunkRepoTester:
                 page_ids.append(page_id)
                 print(f"   ✅ Created test page {i+1} (ID: {page_id})")
 
-            # Create test group
-            group_id = await self.group_repo.create_group(
-                document_id=doc_id, page_ids=page_ids, name=f"Test Group {unique_suffix}"
-            )
-            self.test_group_id = group_id
-            print(f"   ✅ Created test group (ID: {group_id})")
+            # Store test page IDs
+            self.test_page_ids = page_ids
+            print(f"   ✅ Created {len(page_ids)} test pages")
 
             return True
         except Exception as e:
@@ -134,7 +129,7 @@ class ChunkRepoTester:
 
             # Reset instance variables
             self.test_doc_id = None
-            self.test_group_id = None
+            self.test_page_ids = []
             self.test_chunk_ids = []
 
             return True
@@ -146,7 +141,7 @@ class ChunkRepoTester:
         """Test chunk creation."""
         print("\n📝 Testing chunk creation...")
 
-        if not self.test_doc_id or not self.test_group_id:
+        if not self.test_doc_id or not self.test_page_ids:
             print("   ❌ Test data not set up")
             return False
 
@@ -154,23 +149,20 @@ class ChunkRepoTester:
         test_chunks = [
             {
                 "document_id": self.test_doc_id,
-                "group_id": self.test_group_id,
                 "chunk_index": 0,
                 "content": "This is the first chunk of content. It contains information about Python programming language features and best practices.",
                 "embedding": [0.1] * 768,  # Mock embedding
             },
             {
                 "document_id": self.test_doc_id,
-                "group_id": self.test_group_id,
                 "chunk_index": 1,
                 "content": "The second chunk discusses web development frameworks, particularly FastAPI and its async capabilities.",
                 "embedding": [0.2] * 768,  # Mock embedding
             },
             {
                 "document_id": self.test_doc_id,
-                "group_id": None,  # Test chunk without group
-                "chunk_index": 0,
-                "content": "This chunk is not part of any group and contains database-related information about PostgreSQL.",
+                "chunk_index": 2,
+                "content": "This chunk spans multiple pages and contains database-related information about PostgreSQL.",
                 "embedding": [0.3] * 768,  # Mock embedding
             },
         ]
@@ -203,15 +195,13 @@ class ChunkRepoTester:
         batch_chunks = [
             {
                 "document_id": self.test_doc_id,
-                "group_id": None,
-                "chunk_index": 1,
+                "chunk_index": 3,
                 "content": "Batch chunk 1: This is content created via batch operation.",
                 "embedding": [0.4] * 768,
             },
             {
                 "document_id": self.test_doc_id,
-                "group_id": None,
-                "chunk_index": 2,
+                "chunk_index": 4,
                 "content": "Batch chunk 2: Another chunk from the batch creation test.",
                 "embedding": [0.5] * 768,
             },
@@ -274,11 +264,6 @@ class ChunkRepoTester:
             # Test count_by_document
             count = await self.chunk_repo.count_by_document(self.test_doc_id)
             print(f"   ✅ Counted {count} chunks for document {self.test_doc_id}")
-
-            # Test list_by_group
-            if self.test_group_id:
-                group_chunks = await self.chunk_repo.list_by_group(self.test_group_id)
-                print(f"   ✅ Listed {len(group_chunks)} chunks for group {self.test_group_id}")
 
             return True
         except Exception as e:

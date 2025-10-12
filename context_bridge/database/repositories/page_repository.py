@@ -1,6 +1,7 @@
-from typing import Optional, List, Set
+from typing import Optional, List, Set, Tuple
 from datetime import datetime
 import logging
+from uuid import UUID
 from pydantic import BaseModel, Field
 
 from context_bridge.database.postgres_manager import PostgreSQLManager
@@ -21,7 +22,8 @@ class Page(BaseModel):
         content_hash: SHA256 hash of the content for deduplication
         content_length: Length of content (computed column)
         crawled_at: Timestamp when page was crawled
-        status: Page status ('pending', 'grouped', 'deleted')
+        status: Page status ('pending', 'processing', 'chunked', 'deleted')
+        group_id: Optional UUID for future grouping feature
         metadata: Additional metadata as JSON object
     """
 
@@ -33,6 +35,7 @@ class Page(BaseModel):
     content_length: int
     crawled_at: datetime
     status: str = Field(default="pending")
+    group_id: Optional[UUID] = None
     metadata: dict = Field(default_factory=dict)
 
 
@@ -124,7 +127,7 @@ class PageRepository:
         """
         try:
             query = """
-                SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, metadata
+                SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, group_id, metadata
                 FROM pages
                 WHERE id = $1
             """
@@ -156,7 +159,7 @@ class PageRepository:
         """
         try:
             query = """
-                SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, metadata
+                SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, group_id, metadata
                 FROM pages
                 WHERE url = $1
             """
@@ -181,7 +184,7 @@ class PageRepository:
 
         Args:
             document_id: Document ID
-            status: Optional status filter ('pending', 'grouped', 'deleted')
+            status: Optional status filter ('pending', 'processing', 'chunked', 'deleted')
             offset: Number of records to skip
             limit: Maximum number of records to return
 
@@ -194,7 +197,7 @@ class PageRepository:
         try:
             if status:
                 query = """
-                    SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, metadata
+                    SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, group_id, metadata
                     FROM pages
                     WHERE document_id = $1 AND status = $2
                     ORDER BY crawled_at DESC
@@ -203,7 +206,7 @@ class PageRepository:
                 params = [document_id, status, limit, offset]
             else:
                 query = """
-                    SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, metadata
+                    SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, group_id, metadata
                     FROM pages
                     WHERE document_id = $1
                     ORDER BY crawled_at DESC
@@ -265,7 +268,7 @@ class PageRepository:
 
         Args:
             page_id: Page ID to update
-            status: New status ('pending', 'grouped', 'deleted')
+            status: New status ('pending', 'processing', 'chunked', 'deleted')
 
         Returns:
             True if page was updated, False otherwise
@@ -276,7 +279,7 @@ class PageRepository:
         """
         try:
             # Validate status
-            valid_statuses = {"pending", "grouped", "deleted"}
+            valid_statuses = {"pending", "processing", "chunked", "deleted"}
             if status not in valid_statuses:
                 raise ValueError(f"Invalid status '{status}'. Must be one of: {valid_statuses}")
 
@@ -312,7 +315,7 @@ class PageRepository:
         """
         try:
             # Validate status
-            valid_statuses = {"pending", "grouped", "deleted"}
+            valid_statuses = {"pending", "processing", "chunked", "deleted"}
             if status not in valid_statuses:
                 raise ValueError(f"Invalid status '{status}'. Must be one of: {valid_statuses}")
 
@@ -411,6 +414,114 @@ class PageRepository:
             logger.error(f"Failed to check duplicates for {len(content_hashes)} hashes: {e}")
             raise
 
+    async def get_combined_content(
+        self, page_ids: List[int], separator: str = "\n\n---\n\n"
+    ) -> str:
+        """
+        Fetch and combine content from multiple pages.
+
+        Args:
+            page_ids: List of page IDs to fetch
+            separator: Separator to use between page contents
+
+        Returns:
+            Combined content string
+
+        Raises:
+            Exception: Database errors
+        """
+        try:
+            if not page_ids:
+                return ""
+
+            # Build query with IN clause
+            placeholders = ", ".join(f"${i+1}" for i in range(len(page_ids)))
+            query = f"""
+                SELECT content
+                FROM pages
+                WHERE id IN ({placeholders})
+                ORDER BY id
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, page_ids)
+                rows = result.result()
+                contents = [row["content"] for row in rows if row["content"]]
+                combined = separator.join(contents)
+                logger.debug(
+                    f"Combined content from {len(contents)} pages (total length: {len(combined)})"
+                )
+                return combined
+        except Exception as e:
+            logger.error(f"Failed to get combined content for {len(page_ids)} pages: {e}")
+            raise
+
+    async def validate_pages_for_chunking(
+        self,
+        page_ids: List[int],
+        min_size: Optional[int] = None,
+        max_size: Optional[int] = None,
+    ) -> Tuple[bool, Optional[str], int]:
+        """
+        Validate that pages are ready for chunking.
+
+        Args:
+            page_ids: List of page IDs to validate
+            min_size: Minimum combined content size (optional)
+            max_size: Maximum combined content size (optional)
+
+        Returns:
+            Tuple of (is_valid, error_message, total_size)
+
+        Raises:
+            Exception: Database errors
+        """
+        try:
+            if not page_ids:
+                return False, "No pages provided", 0
+
+            # Fetch pages
+            placeholders = ", ".join(f"${i+1}" for i in range(len(page_ids)))
+            query = f"""
+                SELECT id, status, content_length
+                FROM pages
+                WHERE id IN ({placeholders})
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, page_ids)
+                rows = result.result()
+
+            # Check all pages exist
+            found_ids = {row["id"] for row in rows}
+            missing_ids = set(page_ids) - found_ids
+            if missing_ids:
+                return False, f"Pages not found: {missing_ids}", 0
+
+            # Check all pages have 'pending' status
+            invalid_statuses = {
+                row["id"]: row["status"] for row in rows if row["status"] != "pending"
+            }
+            if invalid_statuses:
+                return False, f"Pages not in 'pending' status: {invalid_statuses}", 0
+
+            # Calculate total size
+            total_size = sum(row["content_length"] for row in rows)
+
+            # Check size constraints
+            if min_size and total_size < min_size:
+                return False, f"Combined content too small: {total_size} < {min_size}", total_size
+
+            if max_size and total_size > max_size:
+                return False, f"Combined content too large: {total_size} > {max_size}", total_size
+
+            logger.debug(f"Validated {len(page_ids)} pages for chunking (total size: {total_size})")
+            return True, None, total_size
+
+        except Exception as e:
+            logger.error(f"Failed to validate {len(page_ids)} pages for chunking: {e}")
+            raise
+
     def _row_to_page(self, row: dict) -> Page:
         """
         Convert database row dict to Page model.
@@ -419,7 +530,7 @@ class PageRepository:
 
         Args:
             row: Database row dict with columns: id, document_id, url, content,
-                 content_hash, content_length, crawled_at, status, metadata
+                 content_hash, content_length, crawled_at, status, group_id, metadata
 
         Returns:
             Page model instance
@@ -433,5 +544,6 @@ class PageRepository:
             content_length=row["content_length"],
             crawled_at=row["crawled_at"],
             status=row["status"],
+            group_id=row.get("group_id"),
             metadata=row.get("metadata") or {},  # Ensure empty dict if NULL
         )

@@ -110,7 +110,6 @@ async def test_document(repositories):
     for chunk_data in test_chunks:
         chunk_id = await chunk_repo.create(
             document_id=doc_id,
-            group_id=None,
             chunk_index=chunk_data["chunk_index"],
             content=chunk_data["content"],
             embedding=chunk_data["embedding"],

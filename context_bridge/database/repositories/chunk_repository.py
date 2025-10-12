@@ -1,5 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
+from uuid import UUID
 import logging
 from pydantic import BaseModel, Field
 
@@ -18,8 +19,8 @@ class Chunk(BaseModel):
     Attributes:
         id: Unique chunk identifier
         document_id: Parent document ID
-        group_id: Optional parent group ID
-        chunk_index: Index within the group/document
+        group_id: Optional UUID for future grouping feature
+        chunk_index: Index within the document
         content: Chunk text content
         embedding: Vector embedding as list of floats
         created_at: Timestamp when chunk was created
@@ -27,7 +28,7 @@ class Chunk(BaseModel):
 
     id: int
     document_id: int
-    group_id: Optional[int] = None
+    group_id: Optional[UUID] = None
     chunk_index: int
     content: str
     embedding: List[float]
@@ -72,10 +73,10 @@ class ChunkRepository:
     async def create(
         self,
         document_id: int,
-        group_id: Optional[int],
         chunk_index: int,
         content: str,
         embedding: List[float],
+        group_id: Optional[UUID] = None,
     ) -> int:
         """
         Create a chunk with embedding.
@@ -83,10 +84,10 @@ class ChunkRepository:
 
         Args:
             document_id: Parent document ID
-            group_id: Optional parent group ID
-            chunk_index: Index within group/document
+            chunk_index: Index within document
             content: Chunk text content
             embedding: Embedding vector
+            group_id: Optional UUID for future grouping feature
 
         Returns:
             ID of created chunk
@@ -97,14 +98,14 @@ class ChunkRepository:
         """
         try:
             query = """
-                INSERT INTO chunks (document_id, group_id, chunk_index, content, embedding)
+                INSERT INTO chunks (document_id, chunk_index, content, embedding, group_id)
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING id
             """
             pg_vector = PgVector(embedding)
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(
-                    query, [document_id, group_id, chunk_index, content, pg_vector]
+                    query, [document_id, chunk_index, content, pg_vector, group_id]
                 )
                 rows = result.result()
                 if rows:
@@ -122,7 +123,7 @@ class ChunkRepository:
         Create multiple chunks efficiently.
 
         Args:
-            chunks: List of dicts with keys: document_id, group_id, chunk_index, content, embedding
+            chunks: List of dicts with keys: document_id, chunk_index, content, embedding, group_id (optional)
 
         Returns:
             List of created chunk IDs
@@ -146,17 +147,17 @@ class ChunkRepository:
                 params.extend(
                     [
                         chunk["document_id"],
-                        chunk["group_id"],
                         chunk["chunk_index"],
                         chunk["content"],
                         PgVector(chunk["embedding"]),
+                        chunk.get("group_id"),
                     ]
                 )
                 param_count += 5
 
             values_clause = ", ".join(values_list)
             query = f"""
-                INSERT INTO chunks (document_id, group_id, chunk_index, content, embedding)
+                INSERT INTO chunks (document_id, chunk_index, content, embedding, group_id)
                 VALUES {values_clause}
                 RETURNING id
             """
@@ -236,36 +237,6 @@ class ChunkRepository:
                 return chunks
         except Exception as e:
             logger.error(f"Failed to list chunks for document {document_id}: {e}")
-            raise
-
-    async def list_by_group(self, group_id: int) -> List[Chunk]:
-        """
-        Get all chunks for a group, ordered by chunk_index.
-
-        Args:
-            group_id: Group ID
-
-        Returns:
-            List of chunks ordered by chunk_index
-
-        Raises:
-            Exception: Database errors
-        """
-        try:
-            query = """
-                SELECT id, document_id, group_id, chunk_index, content, embedding, created_at
-                FROM chunks
-                WHERE group_id = $1
-                ORDER BY chunk_index ASC
-            """
-            async with self.db_manager.connection() as conn:
-                result = await conn.execute(query, [group_id])
-                rows = result.result()
-                chunks = [self._row_to_chunk(row) for row in rows]
-                logger.debug(f"Listed {len(chunks)} chunks for group {group_id}")
-                return chunks
-        except Exception as e:
-            logger.error(f"Failed to list chunks for group {group_id}: {e}")
             raise
 
     async def count_by_document(self, document_id: int) -> int:
