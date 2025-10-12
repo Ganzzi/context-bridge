@@ -518,7 +518,7 @@ async def main():
     # Check command line arguments
     init_db = "--init" in sys.argv
     reset_db = "--reset" in sys.argv
-    help_requested = "--help" in sys.argv or "-h" in sys.argv or len(sys.argv) == 1
+    help_requested = "--help" in sys.argv or "-h" in sys.argv
 
     if help_requested:
         print(__doc__)

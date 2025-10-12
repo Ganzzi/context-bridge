@@ -96,8 +96,6 @@ class ChunkRepository:
             Exception: Database errors
         """
         try:
-            # Use PSQLPy parameter binding with $1, $2, etc.
-            # Note: Skipping bm25_vector for now due to tokenizer setup issues
             query = """
                 INSERT INTO chunks (document_id, group_id, chunk_index, content, embedding)
                 VALUES ($1, $2, $3, $4, $5)
@@ -350,7 +348,7 @@ class ChunkRepository:
             raise
 
     async def bm25_search(
-        self, document_id: int, query: str, limit: int = 10
+        self, document_id: int, query: str, limit: int = 10, min_score: float = 0.0
     ) -> List[SearchResult]:
         """
         BM25 full-text search using vchord_bm25.
@@ -360,6 +358,7 @@ class ChunkRepository:
             document_id: Document ID to search within
             query: Search query text
             limit: Maximum number of results
+            min_score: Minimum BM25 score threshold
 
         Returns:
             List of SearchResult ordered by BM25 score
@@ -368,20 +367,21 @@ class ChunkRepository:
             Exception: Database errors
         """
         try:
-            # Use simple text search for now since vchord_bm25 index is not available
+            # Use proper BM25 with to_bm25query() and tokenize()
+            # The index name 'idx_chunks_bm25' must match the BM25 index in schema
             query_sql = """
                 SELECT
                     id, document_id, group_id, chunk_index, content, embedding, created_at,
-                    ts_rank_cd(to_tsvector('english', content), plainto_tsquery('english', $1)) AS bm25_score
+                    bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($1, 'bert')) AS bm25_score
                 FROM chunks
                 WHERE document_id = $2
-                  AND content IS NOT NULL
-                  AND to_tsvector('english', content) @@ plainto_tsquery('english', $1)
+                  AND bm25_vector IS NOT NULL
+                  AND bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($1, 'bert')) >= $3
                 ORDER BY bm25_score DESC
-                LIMIT $3
+                LIMIT $4
             """
             async with self.db_manager.connection() as conn:
-                result = await conn.execute(query_sql, [query, document_id, limit])
+                result = await conn.execute(query_sql, [query, document_id, min_score, limit])
                 rows = result.result()
                 results = []
                 for rank, row in enumerate(rows, 1):
@@ -402,15 +402,17 @@ class ChunkRepository:
         vector_weight: float = 0.7,
         bm25_weight: float = 0.3,
         limit: int = 10,
+        min_vector_score: float = 0.0,
+        min_bm25_score: float = 0.0,
     ) -> List[SearchResult]:
         """
         Hybrid search combining vector and BM25 with weighted scores.
 
         Algorithm:
         1. Perform vector search (top 50)
-        2. Perform BM25 search (top 50)
-        3. Normalize scores to 0-1 range
-        4. Combine: final_score = (vector_score * vector_weight) + (bm25_score * bm25_weight)
+        2. Perform BM25 search using proper vchord_bm25 (top 50)
+        3. Normalize scores to 0-1 range using min-max normalization
+        4. Combine: final_score = (normalized_vector_score * vector_weight) + (normalized_bm25_score * bm25_weight)
         5. Return top N by final score
 
         Args:
@@ -420,6 +422,8 @@ class ChunkRepository:
             vector_weight: Weight for vector similarity (0-1)
             bm25_weight: Weight for BM25 score (0-1)
             limit: Maximum number of results
+            min_vector_score: Minimum vector similarity threshold (0-1)
+            min_bm25_score: Minimum BM25 score threshold
 
         Returns:
             List of SearchResult ordered by combined score
@@ -431,7 +435,7 @@ class ChunkRepository:
             pg_vector = PgVector(query_embedding)
 
             # Get top 50 from each search for better combination
-            top_k = min(50, limit * 2)
+            top_k = min(50, limit * 5)
 
             query_sql = """
                 WITH vector_results AS (
@@ -439,33 +443,65 @@ class ChunkRepository:
                         id,
                         1 - (embedding <=> $1) AS vector_score
                     FROM chunks
-                    WHERE document_id = $2 AND embedding IS NOT NULL
+                    WHERE document_id = $2 
+                      AND embedding IS NOT NULL
+                      AND 1 - (embedding <=> $1) >= $8
                     ORDER BY embedding <=> $1
                     LIMIT $3
                 ),
                 bm25_results AS (
                     SELECT
                         id,
-                        ts_rank_cd(to_tsvector('english', content), plainto_tsquery('english', $4)) AS bm25_score
+                        bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($4, 'bert')) AS bm25_score
                     FROM chunks
-                    WHERE document_id = $2 AND content IS NOT NULL
-                      AND to_tsvector('english', content) @@ plainto_tsquery('english', $4)
+                    WHERE document_id = $2 
+                      AND bm25_vector IS NOT NULL
+                      AND bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($4, 'bert')) >= $9
                     ORDER BY bm25_score DESC
                     LIMIT $3
+                ),
+                score_ranges AS (
+                    SELECT
+                        MAX(vector_score) AS max_vector,
+                        MIN(vector_score) AS min_vector,
+                        MAX(bm25_score) AS max_bm25,
+                        MIN(bm25_score) AS min_bm25
+                    FROM (
+                        SELECT vector_score, NULL AS bm25_score FROM vector_results
+                        UNION ALL
+                        SELECT NULL AS vector_score, bm25_score FROM bm25_results
+                    ) all_scores
                 ),
                 combined_results AS (
                     SELECT
                         c.id, c.document_id, c.group_id, c.chunk_index, c.content, c.embedding, c.created_at,
-                        COALESCE(v.vector_score, 0) AS vector_score,
-                        COALESCE(b.bm25_score, 0) AS bm25_score,
-                        (COALESCE(v.vector_score, 0) * $5 + COALESCE(b.bm25_score, 0) * $6) AS combined_score
+                        COALESCE(v.vector_score, 0) AS raw_vector_score,
+                        COALESCE(b.bm25_score, 0) AS raw_bm25_score,
+                        -- Normalize scores to 0-1 range using min-max normalization
+                        CASE 
+                            WHEN sr.max_vector > sr.min_vector THEN 
+                                (COALESCE(v.vector_score, 0) - sr.min_vector) / (sr.max_vector - sr.min_vector)
+                            ELSE COALESCE(v.vector_score, 0)
+                        END AS norm_vector_score,
+                        CASE 
+                            WHEN sr.max_bm25 > sr.min_bm25 THEN 
+                                (COALESCE(b.bm25_score, 0) - sr.min_bm25) / (sr.max_bm25 - sr.min_bm25)
+                            ELSE COALESCE(b.bm25_score, 0)
+                        END AS norm_bm25_score
                     FROM chunks c
                     LEFT JOIN vector_results v ON c.id = v.id
                     LEFT JOIN bm25_results b ON c.id = b.id
+                    CROSS JOIN score_ranges sr
                     WHERE c.document_id = $2
                       AND (v.vector_score IS NOT NULL OR b.bm25_score IS NOT NULL)
+                ),
+                final_results AS (
+                    SELECT 
+                        *,
+                        (norm_vector_score * $5 + norm_bm25_score * $6) AS combined_score
+                    FROM combined_results
                 )
-                SELECT * FROM combined_results
+                SELECT * FROM final_results
                 WHERE combined_score > 0
                 ORDER BY combined_score DESC
                 LIMIT $7
@@ -474,7 +510,17 @@ class ChunkRepository:
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(
                     query_sql,
-                    [pg_vector, document_id, top_k, query, vector_weight, bm25_weight, limit],
+                    [
+                        pg_vector,
+                        document_id,
+                        top_k,
+                        query,
+                        vector_weight,
+                        bm25_weight,
+                        limit,
+                        min_vector_score,
+                        min_bm25_score,
+                    ],
                 )
                 rows = result.result()
                 results = []
