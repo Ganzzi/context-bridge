@@ -718,14 +718,26 @@ async def update_user_email(
 
 ### DELETE Operations
 
+### DELETE Operations
+
 ```python
 async def delete_user(manager: PostgreSQLManager, user_id: int) -> bool:
-    """Delete a user."""
-    query = "DELETE FROM users WHERE id = $1"
-    
+    """
+    Delete a user.
+    """
     async with manager.connection() as conn:
-        await conn.execute(query, [user_id])
-        return True
+        result = await conn.execute(query, [user_id])
+        # Parse the result to check if any rows were affected
+        if result and hasattr(result, "result"):
+            result_str = str(result.result())
+            if "DELETE 0" in result_str or result.result() == 0:
+                raise ValueError(f"User with ID {user_id} not found")
+        else:
+            # Alternative approach - check if user exists first
+            user = await get_user_by_id(manager, user_id)
+            if not user:
+                raise ValueError(f"User with ID {user_id} not found")
+    return True
 ```
 
 ### Batch Operations

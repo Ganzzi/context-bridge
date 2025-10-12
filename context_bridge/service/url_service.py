@@ -202,3 +202,86 @@ class UrlService:
         except Exception:
             # If parsing fails, default to webpage
             return UrlType.WEBPAGE
+
+    async def is_sitemap(self, url: str) -> bool:
+        """Check if a URL points to a sitemap file.
+
+        Args:
+            url: The URL to check.
+
+        Returns:
+            bool: True if the URL appears to be a sitemap.
+        """
+        try:
+            parsed = urlparse(url)
+            path = parsed.path.lower()
+            query = parsed.query.lower()
+
+            # Check for sitemap patterns
+            sitemap_patterns = [
+                r"/sitemap\.xml",
+                r"/sitemap\.xml\.gz",
+                r"/sitemap_index\.xml",
+                r".*sitemap.*\.xml",
+                r"/robots\.txt",  # Often contains sitemap references
+            ]
+
+            for pattern in sitemap_patterns:
+                if re.search(pattern, url, re.IGNORECASE):
+                    return True
+
+            return False
+
+        except Exception:
+            return False
+
+    async def is_txt(self, url: str) -> bool:
+        """Check if a URL points to a text file.
+
+        Args:
+            url: The URL to check.
+
+        Returns:
+            bool: True if the URL appears to point to a text file.
+        """
+        try:
+            parsed = urlparse(url)
+            path = parsed.path.lower()
+
+            # Check for text file patterns
+            text_file_patterns = [
+                r"\.txt$",
+                r"\.md$",
+                r"\.rst$",
+                r"\.markdown$",
+                r"/readme",
+                r"/changelog",
+                r"/license",
+                r"/authors",
+            ]
+
+            for pattern in text_file_patterns:
+                if re.search(pattern, path, re.IGNORECASE):
+                    return True
+
+            return False
+
+        except Exception:
+            return False
+
+    async def get_domain(self, url: str) -> Optional[str]:
+        """Extract the domain from a URL.
+
+        Args:
+            url: The URL to extract domain from.
+
+        Returns:
+            Optional[str]: The domain (hostname) if valid, None otherwise.
+        """
+        try:
+            parsed = urlparse(url)
+            if parsed.hostname:
+                return parsed.hostname.lower()
+            return None
+        except Exception:
+            return None

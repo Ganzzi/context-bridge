@@ -197,3 +197,141 @@ class TestUrlService:
         url = "not-a-url"
         url_type = await service.detect_url_type(url)
         assert url_type == UrlType.WEBPAGE
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_xml(self, service):
+        """Test is_sitemap with sitemap.xml URL."""
+        url = "https://example.com/sitemap.xml"
+        assert await service.is_sitemap(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_gz(self, service):
+        """Test is_sitemap with compressed sitemap URL."""
+        url = "https://example.com/sitemap.xml.gz"
+        assert await service.is_sitemap(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_index(self, service):
+        """Test is_sitemap with sitemap index URL."""
+        url = "https://example.com/sitemap_index.xml"
+        assert await service.is_sitemap(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_robots_txt(self, service):
+        """Test is_sitemap with robots.txt URL."""
+        url = "https://example.com/robots.txt"
+        assert await service.is_sitemap(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_custom_sitemap(self, service):
+        """Test is_sitemap with custom sitemap URL."""
+        url = "https://example.com/custom-sitemap.xml"
+        assert await service.is_sitemap(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_case_insensitive(self, service):
+        """Test is_sitemap is case insensitive."""
+        url = "https://example.com/SITEMAP.XML"
+        assert await service.is_sitemap(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_not_sitemap(self, service):
+        """Test is_sitemap with non-sitemap URL."""
+        url = "https://example.com/page.html"
+        assert await service.is_sitemap(url) is False
+
+    @pytest.mark.asyncio
+    async def test_is_sitemap_invalid_url(self, service):
+        """Test is_sitemap with invalid URL."""
+        url = "not-a-url"
+        assert await service.is_sitemap(url) is False
+
+    @pytest.mark.asyncio
+    async def test_is_txt_markdown(self, service):
+        """Test is_txt with Markdown file URL."""
+        url = "https://example.com/README.md"
+        assert await service.is_txt(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_txt_text_file(self, service):
+        """Test is_txt with text file URL."""
+        url = "https://example.com/changelog.txt"
+        assert await service.is_txt(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_txt_rst(self, service):
+        """Test is_txt with RST file URL."""
+        url = "https://example.com/docs.rst"
+        assert await service.is_txt(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_txt_license(self, service):
+        """Test is_txt with license file URL."""
+        url = "https://example.com/LICENSE"
+        assert await service.is_txt(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_txt_readme_path(self, service):
+        """Test is_txt with readme in path."""
+        url = "https://example.com/some/readme"
+        assert await service.is_txt(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_txt_case_insensitive(self, service):
+        """Test is_txt is case insensitive."""
+        url = "https://example.com/README.MD"
+        assert await service.is_txt(url) is True
+
+    @pytest.mark.asyncio
+    async def test_is_txt_not_text_file(self, service):
+        """Test is_txt with non-text file URL."""
+        url = "https://example.com/page.html"
+        assert await service.is_txt(url) is False
+
+    @pytest.mark.asyncio
+    async def test_is_txt_invalid_url(self, service):
+        """Test is_txt with invalid URL."""
+        url = "not-a-url"
+        assert await service.is_txt(url) is False
+
+    @pytest.mark.asyncio
+    async def test_get_domain_valid_url(self, service):
+        """Test get_domain with valid URL."""
+        url = "https://example.com/path"
+        domain = await service.get_domain(url)
+        assert domain == "example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_domain_with_subdomain(self, service):
+        """Test get_domain with subdomain."""
+        url = "https://docs.example.com/guide"
+        domain = await service.get_domain(url)
+        assert domain == "docs.example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_domain_http_url(self, service):
+        """Test get_domain with HTTP URL."""
+        url = "http://example.com/path"
+        domain = await service.get_domain(url)
+        assert domain == "example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_domain_case_preservation(self, service):
+        """Test get_domain converts to lowercase."""
+        url = "https://EXAMPLE.COM/path"
+        domain = await service.get_domain(url)
+        assert domain == "example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_domain_invalid_url(self, service):
+        """Test get_domain with invalid URL."""
+        url = "not-a-url"
+        domain = await service.get_domain(url)
+        assert domain is None
+
+    @pytest.mark.asyncio
+    async def test_get_domain_empty_hostname(self, service):
+        """Test get_domain with URL that has no hostname."""
+        url = "https:///path"
+        domain = await service.get_domain(url)
+        assert domain is None
