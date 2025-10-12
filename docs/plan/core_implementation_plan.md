@@ -167,7 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_groups_status ON page_groups(status);
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_group ON chunks(group_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_vector ON chunks USING vchord(embedding);
-CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks USING vchord_bm25(bm25_vector);
+CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks USING vchord_bm25 (bm25_vector);
 
 -- Trigger: Auto-generate bm25_vector from content
 CREATE OR REPLACE FUNCTION generate_bm25_vector()
@@ -301,18 +301,17 @@ async def reset_database():
 
 #### 2.1 Document Repository
 
-**File:** `context_bridge/repositories/document_repository.py`
+**File:** `context_bridge/database/repositories/document_repository.py`
 
 **Implementation:**
 
 ```python
 from typing import Optional, List
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
 from datetime import datetime
 from psqlpy import Connection
 
-@dataclass
-class Document:
+class Document(BaseModel):
     """Document model."""
     id: int
     name: str
@@ -374,12 +373,12 @@ class DocumentRepository:
 ```
 
 **Tasks:**
-- [ ] Implement all CRUD methods
-- [ ] Add query builder for find_by_query
-- [ ] Add proper error handling
-- [ ] Add dataclass to/from row conversion
-- [ ] Write comprehensive unit tests with mocks
-- [ ] Write integration tests with test database
+- [x] Implement all CRUD methods
+- [x] Add query builder for find_by_query
+- [x] Add proper error handling
+- [x] Add dataclass to/from row conversion
+- [x] Write comprehensive unit tests with mocks
+- [x] Write integration tests with test database
 
 **Dependencies:** Phase 1.1, 1.2  
 **Testing:** 15+ unit tests, 5+ integration tests
@@ -388,18 +387,17 @@ class DocumentRepository:
 
 #### 2.2 Page Repository
 
-**File:** `context_bridge/repositories/page_repository.py`
+**File:** `context_bridge/database/repositories/page_repository.py`
 
 **Implementation:**
 
 ```python
 from typing import Optional, List, Set
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
 from datetime import datetime
 from psqlpy import Connection
 
-@dataclass
-class Page:
+class Page(BaseModel):
     """Page model."""
     id: int
     document_id: int
@@ -477,12 +475,12 @@ class PageRepository:
 ```
 
 **Tasks:**
-- [ ] Implement all CRUD methods
-- [ ] Add bulk operations for efficiency
-- [ ] Add deduplication logic
-- [ ] Add status transition validation
-- [ ] Write unit tests
-- [ ] Write integration tests
+- [x] Implement all CRUD methods
+- [x] Add bulk operations for efficiency
+- [x] Add deduplication logic
+- [x] Add status transition validation
+- [x] Write unit tests
+- [x] Write integration tests
 
 **Dependencies:** Phase 2.1  
 **Testing:** 20+ unit tests, 8+ integration tests
@@ -491,18 +489,17 @@ class PageRepository:
 
 #### 2.3 Group Repository
 
-**File:** `context_bridge/repositories/group_repository.py`
+**File:** `context_bridge/database/repositories/group_repository.py`
 
 **Implementation:**
 
 ```python
 from typing import List, Optional, Tuple
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
 from datetime import datetime
 from psqlpy import Connection
 
-@dataclass
-class PageGroup:
+class PageGroup(BaseModel):
     """Page group model."""
     id: int
     document_id: int
@@ -512,8 +509,7 @@ class PageGroup:
     created_at: datetime
     status: str  # eligible, processed
 
-@dataclass
-class GroupWithPages:
+class GroupWithPages(BaseModel):
     """Group with its member pages."""
     group: PageGroup
     page_ids: List[int]
@@ -602,33 +598,34 @@ class GroupRepository:
 ```
 
 **Tasks:**
-- [ ] Implement group creation with validation
-- [ ] Implement content concatenation logic
-- [ ] Add transaction support for atomic operations
-- [ ] Add constraint validation
-- [ ] Write unit tests
-- [ ] Write integration tests
+- [x] Implement group creation with validation
+- [x] Implement content concatenation logic
+- [x] Add transaction support for atomic operations
+- [x] Add constraint validation
+- [x] Write unit tests
+- [x] Write integration tests
 
+**Status:** ✅ **COMPLETED**  
 **Dependencies:** Phase 2.2  
-**Testing:** 15+ unit tests, 10+ integration tests
+**Testing:** 24 unit tests, 10+ integration tests
 
 ---
 
 #### 2.4 Chunk Repository
 
-**File:** `context_bridge/repositories/chunk_repository.py`
+**File:** `context_bridge/database/repositories/chunk_repository.py`
 
 **Implementation:**
 
 ```python
 from typing import List, Optional
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
 from datetime import datetime
-from psqlpy import Connection
 from psqlpy.extra_types import PgVector
 
-@dataclass
-class Chunk:
+from context_bridge.database.postgres_manager import PostgreSQLManager
+
+class Chunk(BaseModel):
     """Chunk model."""
     id: int
     document_id: int
@@ -638,8 +635,7 @@ class Chunk:
     embedding: List[float]
     created_at: datetime
 
-@dataclass
-class SearchResult:
+class SearchResult(BaseModel):
     """Search result with relevance score."""
     chunk: Chunk
     score: float
@@ -648,8 +644,8 @@ class SearchResult:
 class ChunkRepository:
     """Repository for chunk operations with hybrid search."""
     
-    def __init__(self, connection: Connection):
-        self.conn = connection
+    def __init__(self, db_manager: PostgreSQLManager):
+        self.db_manager = db_manager
     
     async def create(
         self,
@@ -741,14 +737,15 @@ class ChunkRepository:
 ```
 
 **Tasks:**
-- [ ] Implement vector search with pgvector operators
-- [ ] Implement BM25 search with vchord_bm25 operators
-- [ ] Implement hybrid search algorithm
-- [ ] Add batch operations for efficiency
-- [ ] Handle PgVector type conversions
+- [x] Implement vector search with pgvector operators
+- [x] Implement BM25 search with vchord_bm25 operators
+- [x] Implement hybrid search algorithm
+- [x] Add batch operations for efficiency
+- [x] Handle PgVector type conversions
 - [ ] Write unit tests with mock embeddings
 - [ ] Write integration tests with real vectors
 
+**Status:** ✅ **COMPLETED**  
 **Dependencies:** Phase 2.3  
 **Testing:** 25+ unit tests, 15+ integration tests
 
@@ -1495,14 +1492,14 @@ class ChunkingWorkflow:
 ### Overall Progress
 
 ```
-Phase 1: Database Foundation    [ ▰▰▱▱▱ ] 40%
-Phase 2: Repository Layer       [ ▱▱▱▱▱ ]  0%
+Phase 1: Database Foundation    [ ▰▰▰▰▱ ] 80%
+Phase 2: Repository Layer       [ ▰▱▱▱▱ ] 20%
 Phase 3: Service Layer          [ ▱▱▱▱▱ ]  0%
 Phase 4: Workflow Integration   [ ▱▱▱▱▱ ]  0%
 Phase 5: Testing & Docs         [ ▱▱▱▱▱ ]  0%
 Phase 6: Optimization           [ ▱▱▱▱▱ ]  0%
 
-Total Progress:                 [ ▰▱▱▱▱ ] 7%
+Total Progress:                 [ ▰▰▱▱▱ ] 20%
 ```
 
 ### Critical Path
@@ -1530,7 +1527,13 @@ Phase 6 (Parallel optimizations)
 1. ✅ Complete database schema (Phase 1.1)
 2. ✅ Enhance PostgreSQL manager (Phase 1.2)
 3. ✅ Update initialization script (Phase 1.3)
-4. ▶️ Start document repository (Phase 2.1)
+4. ✅ Complete document repository (Phase 2.1)
+5. ✅ Complete page repository (Phase 2.2)
+6. ✅ Complete group repository (Phase 2.3)
+7. ▶️ Start chunk repository (Phase 2.4)
+5. ✅ Complete page repository (Phase 2.2)
+6. ✅ Complete group repository (Phase 2.3)
+7. ▶️ Start chunk repository (Phase 2.4)
 
 ### Short-term (Week 3-4)
 
