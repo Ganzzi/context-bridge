@@ -93,6 +93,10 @@ addopts = [
     "--cov-report=xml",
     "-v",
 ]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "unit: marks tests as unit tests",
+]
 
 [tool.black]
 line-length = 100

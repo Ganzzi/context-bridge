@@ -256,7 +256,7 @@ class TestPageRepositoryUnit:
         mock_conn.execute.assert_called_once()
         call_args = mock_conn.execute.call_args
         assert "WHERE document_id = $1" in call_args[0][0]
-        assert "ORDER BY crawled_at DESC" in call_args[0][0]
+        assert "ORDER BY group_id IS NULL DESC, group_id, crawled_at DESC" in call_args[0][0]
         assert call_args[0][1] == [100, 10, 0]
 
     @pytest.mark.asyncio

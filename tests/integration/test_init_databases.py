@@ -14,6 +14,7 @@ from context_bridge.database.init_databases import (
 )
 
 
+@pytest.mark.integration
 class TestVerifySchema:
     """Test schema verification functionality."""
 

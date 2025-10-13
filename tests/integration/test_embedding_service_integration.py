@@ -42,6 +42,7 @@ async def embedding_service(real_config):
 class TestEmbeddingServiceIntegration:
     """Integration tests for EmbeddingService with real Ollama."""
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_get_embedding_real_api(self, embedding_service):
         """Test embedding generation with real Ollama API."""
@@ -54,6 +55,7 @@ class TestEmbeddingServiceIntegration:
         assert all(isinstance(x, float) for x in embedding)
         assert sum(embedding) != 0  # Should not be zero vector
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_get_embedding_caching_integration(self, embedding_service):
         """Test caching functionality with real API calls."""
@@ -74,6 +76,7 @@ class TestEmbeddingServiceIntegration:
         assert stats_after_second["hits"] == 1
         assert embedding1 == embedding2  # Should be identical
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_get_embeddings_batch_real_api(self, embedding_service):
         """Test batch embedding generation with real API."""
@@ -93,6 +96,7 @@ class TestEmbeddingServiceIntegration:
             assert all(isinstance(x, float) for x in embedding)
             assert sum(embedding) != 0  # Should not be zero vector
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_get_embedding_empty_text_integration(self, embedding_service):
         """Test embedding generation with empty text in integration."""
@@ -100,6 +104,7 @@ class TestEmbeddingServiceIntegration:
 
         assert embedding == [0.0] * 768
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_get_embedding_whitespace_text_integration(self, embedding_service):
         """Test embedding generation with whitespace-only text in integration."""
@@ -107,6 +112,7 @@ class TestEmbeddingServiceIntegration:
 
         assert embedding == [0.0] * 768
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_cache_stats_integration(self, embedding_service):
         """Test cache statistics with real API calls."""
@@ -126,6 +132,7 @@ class TestEmbeddingServiceIntegration:
         assert stats["misses"] == 2  # text1 and text2 first occurrences
         assert stats["hit_rate"] == 0.3333333333333333  # 1/3
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_cache_eviction_integration(self, embedding_service):
         """Test cache eviction when max size is reached."""
@@ -144,18 +151,21 @@ class TestEmbeddingServiceIntegration:
         assert stats["size"] <= 2
         assert stats["misses"] == 3  # All were misses due to eviction
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_verify_connection_integration(self, embedding_service):
         """Test connection verification with real API."""
         result = await embedding_service.verify_connection()
         assert result is True
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_ensure_model_available_integration(self, embedding_service):
         """Test model availability check with real API."""
         result = await embedding_service.ensure_model_available()
         assert result is True
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_configuration_validation_integration(self, embedding_service):
         """Test configuration validation."""
@@ -163,6 +173,7 @@ class TestEmbeddingServiceIntegration:
         assert isinstance(errors, list)
         assert len(errors) == 0  # Should have no errors with valid config
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_embedding_consistency(self, embedding_service):
         """Test that same text produces consistent embeddings."""
@@ -177,6 +188,7 @@ class TestEmbeddingServiceIntegration:
         assert len(embedding1) == 768
         assert all(-1 <= x <= 1 for x in embedding1)  # Embeddings typically in [-1, 1]
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_different_texts_different_embeddings(self, embedding_service):
         """Test that different texts produce different embeddings."""
@@ -192,6 +204,7 @@ class TestEmbeddingServiceIntegration:
         # But should have same structure
         assert len(embedding1) == len(embedding2) == 768
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_large_batch_processing(self, embedding_service):
         """Test processing a larger batch of texts."""

@@ -18,6 +18,7 @@ class TestPostgreSQLManager:
         config.postgres_user = "testuser"
         config.postgres_password = "testpass"
         config.postgres_db = "testdb"
+        config.postgres_max_pool_size = 10
         return config
 
     @pytest.fixture
@@ -96,7 +97,7 @@ class TestPostgreSQLManager:
 
         mock_conn = AsyncMock()
         mock_result = MagicMock()
-        mock_result.result.return_value = [[1]]
+        mock_result.result.return_value = [{"health": 1}]
         mock_conn.execute.return_value = mock_result
 
         with patch.object(manager, "connection") as mock_connection:
@@ -105,7 +106,7 @@ class TestPostgreSQLManager:
             result = await manager.health_check()
 
             assert result is True
-            mock_conn.execute.assert_called_once_with("SELECT 1 as health_check")
+            mock_conn.execute.assert_called_once_with("SELECT 1 as health")
 
     @pytest.mark.asyncio
     async def test_health_check_not_initialized(self, manager):

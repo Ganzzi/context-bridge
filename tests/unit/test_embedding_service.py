@@ -132,27 +132,20 @@ class TestEmbeddingService:
         assert stats["size"] == 1
 
     @pytest.mark.asyncio
-    @patch("aiohttp.ClientSession.post")
-    async def test_get_embedding_api_error_with_retry(self, mock_post, embedding_service):
+    @patch.object(EmbeddingService, "_get_embedding_single_attempt")
+    async def test_get_embedding_api_error_with_retry(self, mock_single_attempt, embedding_service):
         """Test embedding generation with API errors and retry logic."""
         # Mock API failure followed by success
-        mock_response_fail = AsyncMock()
-        mock_response_fail.raise_for_status.side_effect = aiohttp.ClientError("Connection failed")
-
-        mock_response_success = AsyncMock()
-        mock_response_success.json.return_value = {"embedding": [0.3] * 768}
-        mock_response_success.raise_for_status = MagicMock()
-
-        mock_post.return_value.__aenter__.side_effect = [
-            mock_response_fail,
-            mock_response_fail,
-            mock_response_success,
+        mock_single_attempt.side_effect = [
+            aiohttp.ClientError("Connection failed"),  # First attempt fails
+            aiohttp.ClientError("Connection failed"),  # Second attempt fails
+            [0.3] * 768,  # Third attempt succeeds
         ]
 
         result = await embedding_service.get_embedding("test text")
 
         assert result == [0.3] * 768
-        assert mock_post.call_count == 3  # 2 failures + 1 success
+        assert mock_single_attempt.call_count == 3  # 2 failures + 1 success
 
     @pytest.mark.asyncio
     @patch("aiohttp.ClientSession.post")
@@ -349,7 +342,7 @@ class TestEmbeddingService:
         errors = service.validate_configuration()
 
         assert len(errors) > 0
-        assert any("base URL" in error.lower() for error in errors)
+        assert any("base url" in error.lower() for error in errors)
         assert any("model" in error.lower() for error in errors)
         assert any("dimension" in error.lower() for error in errors)
         assert any("cache size" in error.lower() for error in errors)

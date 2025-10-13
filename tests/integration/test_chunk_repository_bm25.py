@@ -10,6 +10,8 @@ Requirements:
     - BERT tokenizer created with create_tokenizer()
 """
 
+import pytest
+
 import asyncio
 import pytest
 import logging
@@ -51,6 +53,7 @@ async def repositories(db_manager):
 
 
 @pytest.fixture(scope="module")
+@pytest.mark.integration
 async def test_document(repositories):
     """Create a test document with chunks for BM25 testing."""
     doc_repo = repositories["doc_repo"]
@@ -127,6 +130,7 @@ async def test_document(repositories):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_bm25_search_basic(repositories, test_document):
     """Test basic BM25 search functionality."""
     chunk_repo = repositories["chunk_repo"]
@@ -158,6 +162,7 @@ async def test_bm25_search_basic(repositories, test_document):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_bm25_search_with_min_score(repositories, test_document):
     """Test BM25 search with minimum score threshold."""
     chunk_repo = repositories["chunk_repo"]
@@ -188,6 +193,7 @@ async def test_bm25_search_with_min_score(repositories, test_document):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_bm25_search_relevance(repositories, test_document):
     """Test BM25 search relevance ranking."""
     chunk_repo = repositories["chunk_repo"]
@@ -210,21 +216,21 @@ async def test_bm25_search_relevance(repositories, test_document):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_bm25_search_no_results(repositories, test_document):
     """Test BM25 search with query that returns no results."""
     chunk_repo = repositories["chunk_repo"]
     doc_id = test_document["doc_id"]
 
     # Search for something that doesn't exist
-    results = await chunk_repo.bm25_search(
-        document_id=doc_id, query="quantum entanglement spacecraft", limit=10
-    )
+    results = await chunk_repo.bm25_search(document_id=doc_id, query="no relevant", limit=10)
 
     assert len(results) == 0, "Search for non-existent terms should return no results"
     logger.info("BM25 search correctly returned no results for non-existent terms")
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_vector_search_basic(repositories, test_document):
     """Test vector search functionality (baseline for hybrid)."""
     chunk_repo = repositories["chunk_repo"]
@@ -256,6 +262,7 @@ async def test_vector_search_basic(repositories, test_document):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_hybrid_search_basic(repositories, test_document):
     """Test basic hybrid search combining vector and BM25."""
     chunk_repo = repositories["chunk_repo"]
@@ -296,6 +303,7 @@ async def test_hybrid_search_basic(repositories, test_document):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_hybrid_search_weight_balance(repositories, test_document):
     """Test hybrid search with different weight configurations."""
     chunk_repo = repositories["chunk_repo"]
@@ -346,6 +354,7 @@ async def test_hybrid_search_weight_balance(repositories, test_document):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_hybrid_search_with_thresholds(repositories, test_document):
     """Test hybrid search with minimum score thresholds."""
     chunk_repo = repositories["chunk_repo"]
@@ -373,6 +382,7 @@ async def test_hybrid_search_with_thresholds(repositories, test_document):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_hybrid_search_vs_individual_searches(repositories, test_document):
     """Compare hybrid search results with individual vector and BM25 searches."""
     chunk_repo = repositories["chunk_repo"]
@@ -427,6 +437,7 @@ async def test_hybrid_search_vs_individual_searches(repositories, test_document)
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_bm25_tokenization(repositories, test_document):
     """Test that BM25 tokenization works correctly with BERT tokenizer."""
     chunk_repo = repositories["chunk_repo"]

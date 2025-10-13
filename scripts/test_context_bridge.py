@@ -74,7 +74,7 @@ class ContextBridgeTester:
 
         try:
             # Get all test documents
-            docs = await self.bridge.list_documents()
+            docs = await self.bridge.find_documents()
             test_docs = [d for d in docs if d.name.startswith("test-cb-")]
 
             for doc in test_docs:
@@ -89,15 +89,15 @@ class ContextBridgeTester:
         """Test basic document operations."""
         print("\n📄 Testing basic document operations...")
 
-        # Test listing documents (should be empty initially)
-        docs = await self.bridge.list_documents()
+        # Test finding all documents (should be empty initially)
+        docs = await self.bridge.find_documents()
         initial_count = len(docs)
         print(f"  Initial documents: {initial_count}")
 
-        # Test getting non-existent document
-        doc = await self.bridge.get_document("non-existent", "1.0.0")
-        assert doc is None
-        print("  ✅ Non-existent document returns None")
+        # Test finding non-existent document
+        docs = await self.bridge.find_documents(name="non-existent", version="1.0.0")
+        assert len(docs) == 0
+        print("  ✅ Non-existent document returns empty list")
 
         print("✅ Basic operations tests completed")
 
@@ -140,8 +140,9 @@ class ContextBridgeTester:
                 self.test_docs.append((result.document_id, test_case["name"], test_case["version"]))
 
                 # Verify document was created
-                doc = await self.bridge.get_document(test_case["name"], test_case["version"])
-                assert doc is not None
+                docs = await self.bridge.find_documents(test_case["name"], test_case["version"])
+                assert len(docs) == 1
+                doc = docs[0]
                 assert doc.name == test_case["name"]
                 assert doc.version == test_case["version"]
 
@@ -290,23 +291,22 @@ class ContextBridgeTester:
                 print(f"    ❌ Search error: {e}")
                 raise
 
-            # Test cross-version search
-            print(f"  Testing cross-version search for {name}")
+            # Test find_documents functionality
+            print(f"  Testing find_documents for {name}")
             try:
-                version_results = await self.bridge.search_across_versions(
-                    query="test", document_name=name, limit_per_version=3
-                )
+                # Find all versions of the document
+                version_docs = await self.bridge.find_documents(name=name)
+                print(f"    ✅ Found {len(version_docs)} version(s) of document '{name}'")
 
-                total_results = sum(len(results) for results in version_results.values())
-                print(
-                    f"    ✅ Found {total_results} results across {len(version_results)} versions"
-                )
+                for doc in version_docs:
+                    print(f"      v{doc.version}: ID {doc.id}")
 
-                for ver, results in version_results.items():
-                    print(f"      v{ver}: {len(results)} results")
+                # Find specific version
+                specific_docs = await self.bridge.find_documents(name=name, version=version)
+                print(f"    ✅ Found specific version: {len(specific_docs)} document(s)")
 
             except Exception as e:
-                print(f"    ❌ Cross-version search error: {e}")
+                print(f"    ❌ Find documents error: {e}")
                 raise
         else:
             print("  ⏭️  Skipping search tests (--skip-ollama flag used)")

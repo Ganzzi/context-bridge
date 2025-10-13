@@ -197,41 +197,54 @@ class ContextBridge:
             max_depth=max_depth,
         )
 
-    async def list_documents(self, offset: int = 0, limit: int = 100) -> List[Document]:
+    async def find_documents(
+        self,
+        name: Optional[str] = None,
+        version: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> List[Document]:
         """
-        List all documents with pagination.
+        Find documents with optional filtering by name and/or version.
 
         Args:
+            name: Optional document name to filter by (exact match)
+            version: Optional version to filter by (exact match)
             offset: Pagination offset
             limit: Maximum results
 
         Returns:
-            List of Document objects
+            List of Document objects matching the criteria
 
         Raises:
             RuntimeError: If ContextBridge not initialized
+
+        Example:
+            # Find all documents
+            all_docs = await bridge.find_documents()
+
+            # Find specific document
+            docs = await bridge.find_documents(name="psqlpy", version="0.9.0")
+
+            # Find all versions of a document
+            versions = await bridge.find_documents(name="psqlpy")
         """
         self._check_initialized()
         doc_repo = DocumentRepository(self._db_manager)
+
+        # If both name and version are provided, get specific document
+        if name and version:
+            doc = await doc_repo.get_by_name_version(name, version)
+            return [doc] if doc else []
+
+        # If only name is provided, get all versions of that document
+        if name:
+            all_docs = await doc_repo.list_all(offset=0, limit=1000)  # Get all for filtering
+            filtered = [d for d in all_docs if d.name == name]
+            return filtered[offset : offset + limit]
+
+        # Otherwise, list all documents with pagination
         return await doc_repo.list_all(offset=offset, limit=limit)
-
-    async def get_document(self, name: str, version: str) -> Optional[Document]:
-        """
-        Get a specific document by name and version.
-
-        Args:
-            name: Document name
-            version: Document version
-
-        Returns:
-            Document or None if not found
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        doc_repo = DocumentRepository(self._db_manager)
-        return await doc_repo.get_by_name_version(name, version)
 
     async def delete_document(self, document_id: int) -> bool:
         """
@@ -352,28 +365,6 @@ class ContextBridge:
             limit=limit,
             vector_weight=vector_weight,
             bm25_weight=bm25_weight,
-        )
-
-    async def search_across_versions(
-        self, query: str, document_name: str, limit_per_version: int = 5
-    ) -> Dict[str, List[ContentSearchResult]]:
-        """
-        Search across all versions of a document.
-
-        Args:
-            query: Search query
-            document_name: Document name
-            limit_per_version: Maximum results per version
-
-        Returns:
-            Dict mapping version -> list of results
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        return await self._search_service.search_across_versions(
-            query=query, document_name=document_name, limit_per_version=limit_per_version
         )
 
     # Utility Methods
