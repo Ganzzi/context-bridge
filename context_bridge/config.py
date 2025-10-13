@@ -24,7 +24,7 @@ class Config(BaseModel):
         default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     )
     embedding_model: str = Field(
-        default_factory=lambda: os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
+        default_factory=lambda: os.getenv("EMBEDDING_MODEL", "nomic-embed-text:latest")
     )
     vector_dimension: int = Field(default_factory=lambda: int(os.getenv("VECTOR_DIMENSION", "768")))
 
@@ -40,6 +40,21 @@ class Config(BaseModel):
     vector_weight: float = Field(
         default_factory=lambda: float(os.getenv("VECTOR_WEIGHT", "0.7")),
         description="Weight for vector in hybrid search",
+    )
+
+    # Chunking configuration
+    chunk_size: int = Field(default=2000, description="Default chunk size for markdown chunking")
+    min_combined_content_size: int = Field(
+        default=100, description="Minimum total size for combined page content"
+    )
+    max_combined_content_size: int = Field(
+        default=50000, description="Maximum total size for combined page content"
+    )
+
+    # Crawling configuration
+    crawl_max_depth: int = Field(default=3, description="Maximum crawl depth for web crawling")
+    crawl_max_concurrent: int = Field(
+        default=10, description="Maximum concurrent crawling operations"
     )
 
     model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8")

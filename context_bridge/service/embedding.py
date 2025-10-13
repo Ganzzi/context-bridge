@@ -72,8 +72,8 @@ class EmbeddingService:
 
         # Retry configuration
         self.max_retries = 3
-        self.base_retry_delay = 1.0  # seconds
-        self.max_retry_delay = 30.0  # seconds
+        self.base_retry_delay = 5.0  # seconds (increased for model loading)
+        self.max_retry_delay = 60.0  # seconds (increased for model loading)
 
         logger.info(f"Embedding service initialized: {self.model} ({self.vector_dimension}D)")
         if self.enable_cache:
@@ -149,13 +149,13 @@ class EmbeddingService:
         else:
             raise last_exception
 
-    async def get_embedding(self, text: str, timeout: int = 30) -> List[float]:
+    async def get_embedding(self, text: str, timeout: int = 120) -> List[float]:
         """
         Generate an embedding for the given text.
 
         Args:
             text: Text to embed
-            timeout: Request timeout in seconds (default: 30)
+            timeout: Request timeout in seconds (default: 120 for model loading)
 
         Returns:
             List of float values representing the text embedding
@@ -231,7 +231,7 @@ class EmbeddingService:
         payload = {
             "model": self.model,
             "prompt": text,
-            "options": {"num_gpu": 0},
+            # "options": {"num_gpu": 0},
         }
 
         async with aiohttp.ClientSession() as session:
@@ -255,7 +255,7 @@ class EmbeddingService:
         self,
         texts: List[str],
         batch_size: int = 10,
-        timeout: int = 30,
+        timeout: int = 120,
     ) -> List[List[float]]:
         """
         Generate embeddings for multiple texts in batches.
@@ -263,7 +263,7 @@ class EmbeddingService:
         Args:
             texts: List of texts to embed
             batch_size: Number of concurrent requests (default: 10)
-            timeout: Request timeout per embedding (default: 30)
+            timeout: Request timeout per embedding (default: 120)
 
         Returns:
             List of embeddings in the same order as input texts
@@ -378,7 +378,7 @@ class EmbeddingService:
             True if model is available and working, False otherwise
         """
         try:
-            test_embedding = await self.get_embedding("test", timeout=10)
+            test_embedding = await self.get_embedding("test", timeout=60)
 
             # Check if we got a real embedding (not zero vector)
             if sum(test_embedding) == 0:

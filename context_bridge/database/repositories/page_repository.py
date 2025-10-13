@@ -200,7 +200,7 @@ class PageRepository:
                     SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, group_id, metadata
                     FROM pages
                     WHERE document_id = $1 AND status = $2
-                    ORDER BY crawled_at DESC
+                    ORDER BY group_id IS NULL DESC, group_id, crawled_at DESC
                     LIMIT $3 OFFSET $4
                 """
                 params = [document_id, status, limit, offset]
@@ -209,7 +209,7 @@ class PageRepository:
                     SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, group_id, metadata
                     FROM pages
                     WHERE document_id = $1
-                    ORDER BY crawled_at DESC
+                    ORDER BY group_id IS NULL DESC, group_id, crawled_at DESC
                     LIMIT $2 OFFSET $3
                 """
                 params = [document_id, limit, offset]
