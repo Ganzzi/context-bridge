@@ -76,6 +76,7 @@ Issues = "https://github.com/yourusername/context_bridge/issues"
 
 [project.scripts]
 context-bridge = "context_bridge.__main__:main"
+context-bridge-mcp = "context_bridge_mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["context_bridge"]
@@ -96,6 +97,8 @@ addopts = [
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "unit: marks tests as unit tests",
+    "slow: marks tests as slow tests (deselect with '-m \"not slow\"')",
+    "e2e: marks tests as end-to-end browser tests",
 ]
 
 [tool.black]
@@ -184,7 +187,13 @@ exclude_lines = [
 
 [dependency-groups]
 dev = [
+    "playwright>=1.55.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-cov>=7.0.0",
+    "pytest-playwright>=0.7.1",
+    "requests>=2.32.5",
+]
+ui = [
+    "streamlit>=1.50.0",
 ]

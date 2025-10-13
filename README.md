@@ -175,6 +175,26 @@ pip install context-bridge[ui]
 pip install context-bridge[all]
 ```
 
+### Running the Applications
+
+**MCP Server:**
+```bash
+# Using the installed script
+context-bridge-mcp
+
+# Or run directly
+python -m context_bridge_mcp
+```
+
+**Streamlit UI:**
+```bash
+# Using streamlit directly
+streamlit run streamlit_app/app.py
+
+# Or with uv
+uv run streamlit run streamlit_app/app.py
+```
+
 ### Install from Source
 
 ```bash
@@ -450,6 +470,49 @@ for chunk in chunks:
     print(f"Content: {chunk.content[:200]}...")
 ```
 
+### Using the Streamlit UI
+
+The Context Bridge includes a full-featured web interface for managing documentation:
+
+```bash
+# Install with UI support
+pip install context-bridge[ui]
+
+# Run the Streamlit application
+uv run streamlit run streamlit_app/app.py
+
+# Or use the installed script
+context-bridge-ui
+```
+
+**Features:**
+- **Document Management**: View, search, and delete documents
+- **Page Organization**: Select and group crawled pages for processing
+- **Chunk Processing**: Convert page groups into searchable chunks
+- **Hybrid Search**: Search across all documentation with advanced filtering
+
+### Using the MCP Server
+
+The Model Context Protocol server allows AI agents to interact with Context Bridge:
+
+```bash
+# Install with MCP support
+pip install context-bridge[mcp]
+
+# Run the MCP server
+uv run python -m context_bridge_mcp
+
+# Or use the installed script
+context-bridge-mcp
+```
+
+**Available Tools:**
+- `find_documents`: Search for documents by name, version, or query
+- `search_content`: Perform hybrid vector + BM25 search within documents
+
+**Integration with AI Clients:**
+The MCP server can be integrated with AI assistants like Claude Desktop for seamless documentation access.
+
 ---
 
 ## 🗄️ Database Schema
@@ -520,8 +583,10 @@ CREATE INDEX idx_chunks_document ON chunks(document_id);
 ### Project Structure
 
 ```
-context_bridge/
+context_bridge/               # Core package
+├── __init__.py
 ├── config.py                 # Configuration management
+├── core.py                   # Main ContextBridge API
 ├── database/
 │   ├── init_databases.py     # Database initialization
 │   └── postgres_manager.py   # Connection pool manager
@@ -538,14 +603,29 @@ context_bridge/
 │   ├── embedding.py
 │   ├── search_service.py
 │   └── url_service.py
-├── mcp_server/              # MCP server implementation
-│   └── server.py
-└── streamlit_app/           # Streamlit UI
-    └── app.py
 
-docs/
+context_bridge_mcp/          # MCP Server (Model Context Protocol)
+├── __init__.py
+├── server.py                 # MCP server implementation
+├── schemas.py                # Tool input/output schemas
+└── __main__.py               # CLI entry point
+
+streamlit_app/               # Streamlit Web UI
+├── __init__.py
+├── app.py                    # Main application
+├── pages/                    # Multi-page navigation
+│   ├── documents.py          # Document management
+│   ├── crawled_pages.py      # Page management
+│   └── search.py             # Search interface
+├── components/               # Reusable UI components
+├── utils/                    # UI utilities and helpers
+└── README.md                 # UI-specific documentation
+
+docs/                        # Documentation
+├── ui_testing_report.md     # UI testing results
 ├── plan/                    # Development plans
-└── technical/               # Technical documentation
+│   └── ui_and_mcp_implementation_plan.md
+└── technical/               # Technical guides
     ├── crawl4ai_complete_guide.md
     ├── embedding_service.md
     ├── psqlpy-complete-guide.md
@@ -554,6 +634,13 @@ docs/
     └── smart_chunk_markdown_algorithm.md
 
 tests/                       # Test suite
+├── conftest.py
+├── integration/
+├── unit/
+└── e2e/                     # End-to-end tests
+    ├── conftest.py
+    └── test_streamlit_ui.py
+```
 ```
 
 ### Running Tests
@@ -589,14 +676,22 @@ ruff check context_bridge
 
 ## 📖 Technical Documentation
 
-Comprehensive technical guides are available in `docs/technical/`:
+Comprehensive technical guides are available in `docs/`:
 
+### Testing & Quality Assurance
+- **[UI Testing Report](docs/ui_testing_report.md)** - Comprehensive Playwright testing results and bug fixes
+- **[MCP Server Usage Guide](docs/MCP_SERVER_USAGE.md)** - How to use the MCP server with AI clients
+
+### Technical Guides (`docs/technical/`)
 - **[Crawl4AI Guide](docs/technical/crawl4ai_complete_guide.md)** - Complete crawling documentation
 - **[Embedding Service](docs/technical/embedding_service.md)** - Ollama and Gemini embedding setup
 - **[PSQLPy Guide](docs/technical/psqlpy-complete-guide.md)** - PostgreSQL driver usage
 - **[MCP Server Guide](docs/technical/python_mcp_server_guide.md)** - MCP server implementation
 - **[Testing Guide](docs/technical/python-testing-guide.md)** - Testing best practices
 - **[Smart Chunking Algorithm](docs/technical/smart_chunk_markdown_algorithm.md)** - Chunking implementation
+
+### Implementation Plans (`docs/plan/`)
+- **[UI & MCP Implementation Plan](docs/plan/ui_and_mcp_implementation_plan.md)** - Development roadmap and progress
 
 ---
 

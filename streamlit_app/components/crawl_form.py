@@ -1,0 +1,172 @@
+"""
+Crawl form component for initiating document crawling.
+"""
+
+import streamlit as st
+import asyncio
+from context_bridge import ContextBridge
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from utils.ui_helpers import (
+    show_error,
+    show_success,
+    show_info,
+    handle_error,
+    validate_input,
+)
+from utils.caching import CacheManager
+
+
+def render_crawl_form(bridge: ContextBridge):
+    """Render form for crawling new documentation with enhanced error handling."""
+    st.subheader("🚀 Crawl New Documentation")
+
+    show_info(
+        "Enter the details below to crawl and add new documentation to your library. "
+        "The crawler will automatically discover and store all pages from the provided URL."
+    )
+
+    with st.form("crawl_form"):
+        name = st.text_input(
+            "Document Name*",
+            placeholder="e.g., psqlpy",
+            help="A unique name for this documentation",
+        )
+        version = st.text_input(
+            "Version*", placeholder="e.g., 0.9.0", help="Version number of the documentation"
+        )
+        url = st.text_input(
+            "Source URL*",
+            placeholder="https://example.com/docs",
+            help="Starting URL for the crawler",
+        )
+        description = st.text_area(
+            "Description (optional)",
+            placeholder="Brief description of this documentation...",
+            help="Optional description to help identify this documentation",
+        )
+        max_depth = st.slider(
+            "Max Crawl Depth",
+            min_value=1,
+            max_value=10,
+            value=3,
+            help="Maximum depth to follow links (1 = only the start page, 2 = one level deep, etc.)",
+        )
+
+        submitted = st.form_submit_button("🚀 Start Crawling", type="primary")
+
+        if submitted:
+            # Validate all inputs
+            errors = []
+
+            is_valid, error_msg = validate_input(
+                name, "Document Name", required=True, min_length=2, max_length=100
+            )
+            if not is_valid:
+                errors.append(error_msg)
+
+            is_valid, error_msg = validate_input(
+                version, "Version", required=True, min_length=1, max_length=50
+            )
+            if not is_valid:
+                errors.append(error_msg)
+
+            is_valid, error_msg = validate_input(url, "Source URL", required=True, min_length=10)
+            if not is_valid:
+                errors.append(error_msg)
+            elif not url.startswith(("http://", "https://")):
+                errors.append("URL must start with http:// or https://")
+
+            # Show all validation errors
+            if errors:
+                for error in errors:
+                    show_error(error)
+                return
+
+            # Start crawling process
+            try:
+                with st.spinner("Crawling documentation... This may take a few minutes."):
+                    # Create progress bar
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    status_text.text("🔍 Initializing crawler...")
+
+                    # Run crawling in asyncio event loop
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    # Update progress
+                    progress_bar.progress(25)
+                    status_text.text("🌐 Starting crawl process...")
+
+                    try:
+                        # Perform the crawl
+                        result = loop.run_until_complete(
+                            bridge.crawl_documentation(
+                                name=name.strip(),
+                                version=version.strip(),
+                                source_url=url.strip(),
+                                description=description.strip() if description else None,
+                                max_depth=max_depth,
+                            )
+                        )
+
+                        progress_bar.progress(100)
+                        status_text.text("✅ Crawl completed!")
+
+                        # Invalidate documents cache
+                        CacheManager.invalidate(prefix="documents")
+
+                        # Display results
+                        show_success("Crawling completed successfully!")
+
+                        with st.expander("📊 Crawl Results", expanded=True):
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Document ID", result.document_id)
+                            with col2:
+                                st.metric("Pages Crawled", result.pages_crawled)
+                            with col3:
+                                st.metric("Pages Stored", result.pages_stored)
+                            with col4:
+                                st.metric("Duplicates Skipped", result.duplicates_skipped)
+
+                            if result.errors > 0:
+                                st.warning(f"⚠️ {result.errors} errors occurred during crawling")
+
+                            show_info(
+                                f"Document '{result.document_name} v{result.document_version}' has been added to your library."
+                            )
+
+                            # Add button to view the document
+                            if st.button("👀 View Pages", key=f"view_crawled_{result.document_id}"):
+                                st.session_state.selected_document = result.document_id
+                                st.switch_page("pages/crawled_pages.py")
+
+                    finally:
+                        loop.close()
+
+            except ConnectionError as e:
+                handle_error(e, "Network Connection", show_details=True)
+                show_info("Please check your internet connection and try again.")
+
+            except ValueError as e:
+                handle_error(e, "Invalid Input", show_details=True)
+                show_info("Please verify your inputs and try again.")
+
+            except TimeoutError as e:
+                handle_error(e, "Crawl Timeout", show_details=True)
+                show_info(
+                    "The crawl took too long. Try reducing the max depth or checking the URL."
+                )
+
+            except Exception as e:
+                handle_error(e, "Crawling Process", show_details=True)
+                show_info(
+                    "Please check your URL and try again. Make sure the website allows crawling and is accessible."
+                )
