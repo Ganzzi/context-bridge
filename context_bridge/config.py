@@ -48,7 +48,7 @@ class Config(BaseModel):
         default=100, description="Minimum total size for combined page content"
     )
     max_combined_content_size: int = Field(
-        default=50000, description="Maximum total size for combined page content"
+        default=200000, description="Maximum total size for combined page content"
     )
 
     # Crawling configuration

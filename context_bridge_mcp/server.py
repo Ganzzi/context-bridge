@@ -122,12 +122,11 @@ async def _handle_find_documents(
     """Handle find_documents tool call."""
     try:
         # Extract parameters from arguments
-        name = arguments.get("name")
-        version = arguments.get("version")
+        query = arguments["query"]
         limit = arguments.get("limit", 10)
 
         # Get documents
-        documents = await bridge.find_documents(name=name, version=version, limit=limit)
+        documents = await bridge.find_documents(query=query, limit=limit)
 
         # Format response
         if not documents:

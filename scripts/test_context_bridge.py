@@ -115,7 +115,7 @@ class ContextBridgeTester:
             {
                 "name": "test-cb-json",
                 "version": "1.0.0",
-                "url": "https://httpbin.org/json",
+                "url": "https://httpbin.org/html",  # Changed from json to html for more content
                 "description": "JSON test endpoint",
             },
         ]
@@ -242,6 +242,17 @@ class ContextBridgeTester:
             if pending_pages:
                 page_ids = [p.id for p in pending_pages]
 
+                # Debug: Check content size
+                from context_bridge.database.repositories.page_repository import PageRepository
+
+                page_repo = PageRepository(self.bridge._db_manager)
+                content_length = 0
+                for page_id in page_ids:
+                    page = await page_repo.get_by_id(page_id)
+                    if page:
+                        content_length += len(page.content)
+                print(f"    📏 Total content length: {content_length} characters")
+
                 # Test chunking with batch processing
                 print(f"    🔄 Processing chunking for {len(page_ids)} pages (batch mode)...")
                 chunk_result = await self.bridge.process_pages(
@@ -251,19 +262,120 @@ class ContextBridgeTester:
                 )
 
                 print(f"    ✅ Processing started for {chunk_result.pages_processed} pages")
-                print(f"    📦 Chunks created: {chunk_result.chunks_created}")
-                print(f"    ❌ Errors: {chunk_result.errors}")
 
-                # Verify chunks were created
-                if chunk_result.chunks_created > 0:
-                    print("    ✅ Chunking completed successfully")
+                # Wait for chunking completion
+                print(f"    ⏳ Waiting for chunking to complete...")
+                completion_result = await self.bridge.wait_for_chunking_completion(
+                    document_id=doc_id,
+                    page_ids=page_ids,
+                    timeout_seconds=30,  # 30 second timeout for testing
+                    poll_interval=0.5,
+                )
+
+                if completion_result["completed"]:
+                    print(
+                        f"    ✅ Chunking completed successfully in {completion_result['elapsed_seconds']:.1f}s"
+                    )
+                    print(f"    📦 Chunks created: {completion_result['chunks_created']}")
+                    print(f"    📄 Pages chunked: {completion_result['pages_chunked']}")
                 else:
-                    print("    ⚠️  No chunks created (processing may still be running)")
+                    print(
+                        f"    ⚠️  Chunking timed out after {completion_result['elapsed_seconds']:.1f}s"
+                    )
+                    print(f"    📦 Chunks created so far: {completion_result['chunks_created']}")
+                    print(
+                        f"    🔄 Pages still processing: {completion_result.get('pages_still_processing', 0)}"
+                    )
+                    print(f"    📄 Pages chunked: {completion_result['pages_chunked']}")
+
+                # Additional verification using get_chunk_stats
+                stats = await self.bridge.get_chunk_stats(doc_id)
+                print(
+                    f"    📊 Final stats: {stats['total_chunks']} chunks, page statuses: {stats['page_status_counts']}"
+                )
 
             else:
                 print("    ⚠️  No pending pages to process")
 
         print("✅ Chunking processing tests completed")
+
+    async def test_synchronous_chunking(self):
+        """Test synchronous chunking functionality."""
+        print("\n🔄 Testing synchronous chunking...")
+
+        # Create fresh test data for synchronous testing
+        sync_docs = []
+        try:
+            # Create test documents
+            result1 = await self.bridge.crawl_documentation(
+                name="test-cb-sync-html",
+                version="1.0.0",
+                source_url="https://httpbin.org/html",
+                description="Sync test HTML page",
+            )
+            sync_docs.append((result1.document_id, "test-cb-sync-html", "1.0.0"))
+
+            result2 = await self.bridge.crawl_documentation(
+                name="test-cb-sync-html2",
+                version="1.0.0",
+                source_url="https://httpbin.org/xml",  # Different endpoint
+                description="Sync test XML page",
+            )
+            sync_docs.append((result2.document_id, "test-cb-sync-html2", "1.0.0"))
+            sync_docs.append((result2.document_id, "test-cb-sync-json", "1.0.0"))
+
+            for doc_id, name, version in sync_docs:
+                print(f"  Testing synchronous chunking for {name} v{version} (ID: {doc_id})")
+
+                # Get pending pages
+                pending_pages = await self.bridge.list_pages(doc_id, status="pending")
+                print(f"    ⏳ Pending pages: {len(pending_pages)}")
+
+                if pending_pages:
+                    page_ids = [p.id for p in pending_pages]
+
+                    # Test synchronous chunking
+                    print(f"    🔄 Processing chunking synchronously for {len(page_ids)} pages...")
+                    start_time = asyncio.get_event_loop().time()
+
+                    result = await self.bridge.process_pages(
+                        document_id=doc_id,
+                        page_ids=page_ids,
+                        chunk_size=1000,
+                        run_async=False,  # Run synchronously
+                    )
+
+                    end_time = asyncio.get_event_loop().time()
+                    duration = end_time - start_time
+
+                    print(f"    ✅ Synchronous processing completed in {duration:.1f}s")
+                    print(f"    📦 Pages processed: {result.pages_processed}")
+
+                    # Verify chunks were created immediately
+                    stats = await self.bridge.get_chunk_stats(doc_id)
+                    print(
+                        f"    📊 Final stats: {stats['total_chunks']} chunks, page statuses: {stats['page_status_counts']}"
+                    )
+
+                    # Verify all pages are now chunked
+                    chunked_pages = await self.bridge.list_pages(doc_id, status="chunked")
+                    assert len(chunked_pages) == len(page_ids), "All pages should be chunked"
+
+                    print("    ✅ Synchronous chunking completed successfully")
+
+                else:
+                    print("    ⚠️  No pending pages to process")
+
+        finally:
+            # Clean up sync test data
+            for doc_id, name, version in sync_docs:
+                try:
+                    await self.bridge.delete_document(doc_id)
+                    print(f"    🧹 Cleaned up sync test document: {name} v{version}")
+                except Exception as e:
+                    print(f"    ⚠️  Error cleaning up {name}: {e}")
+
+        print("✅ Synchronous chunking tests completed")
 
     async def test_search_functionality(self):
         """Test search functionality."""
@@ -386,14 +498,15 @@ class ContextBridgeTester:
             await self.test_basic_operations()
             await self.test_crawl_and_store()
             await self.test_duplicate_handling()
-            await self.test_page_management()
 
             if not self.skip_ollama:
                 await self.test_chunking_processing()
+                await self.test_synchronous_chunking()
                 await self.test_search_functionality()
             else:
                 print("\n⏭️  Skipping chunking and search tests (--skip-ollama flag used)")
 
+            await self.test_page_management()
             await self.test_error_handling()
             await self.test_health_check()
 

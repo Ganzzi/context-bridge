@@ -9,6 +9,7 @@ page management, chunking, embedding generation, and search operations.
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import logging
+import asyncio
 
 from context_bridge.config import Config
 from context_bridge.database.postgres_manager import PostgreSQLManager
@@ -48,11 +49,15 @@ class ContextBridge:
         bridge = ContextBridge()
         await bridge.initialize()
 
-        # Crawl documentation
+        # Crawl documentation with additional URLs
         result = await bridge.crawl_documentation(
             name="psqlpy",
             version="0.9.0",
-            source_url="https://psqlpy.readthedocs.io"
+            source_url="https://psqlpy.readthedocs.io",
+            additional_urls=[
+                "https://psqlpy.readthedocs.io/api/",
+                "https://psqlpy.readthedocs.io/examples/"
+            ]
         )
 
         # List pages
@@ -170,6 +175,7 @@ class ContextBridge:
         source_url: str,
         description: Optional[str] = None,
         max_depth: Optional[int] = None,
+        additional_urls: Optional[List[str]] = None,
     ) -> CrawlAndStoreResult:
         """
         Crawl and store documentation from a URL.
@@ -177,9 +183,10 @@ class ContextBridge:
         Args:
             name: Document name
             version: Document version
-            source_url: URL to crawl
+            source_url: Primary URL to crawl
             description: Optional description
             max_depth: Optional crawl depth override (1-10)
+            additional_urls: Optional list of additional URLs to crawl with the same depth
 
         Returns:
             CrawlAndStoreResult with summary
@@ -195,56 +202,32 @@ class ContextBridge:
             source_url=source_url,
             description=description,
             max_depth=max_depth,
+            additional_urls=additional_urls,
         )
 
     async def find_documents(
         self,
-        name: Optional[str] = None,
-        version: Optional[str] = None,
-        offset: int = 0,
-        limit: int = 100,
+        query: str,
+        limit: int = 10,
     ) -> List[Document]:
         """
-        Find documents with optional filtering by name and/or version.
+        Find documents by query.
+        Searches document name, description, and metadata.
+        Returns documents sorted by relevance.
 
         Args:
-            name: Optional document name to filter by (exact match)
-            version: Optional version to filter by (exact match)
-            offset: Pagination offset
-            limit: Maximum results
+            query: Search query string
+            limit: Maximum number of results to return
 
         Returns:
-            List of Document objects matching the criteria
+            List of Document objects sorted by relevance score
 
         Raises:
             RuntimeError: If ContextBridge not initialized
-
-        Example:
-            # Find all documents
-            all_docs = await bridge.find_documents()
-
-            # Find specific document
-            docs = await bridge.find_documents(name="psqlpy", version="0.9.0")
-
-            # Find all versions of a document
-            versions = await bridge.find_documents(name="psqlpy")
         """
         self._check_initialized()
-        doc_repo = DocumentRepository(self._db_manager)
-
-        # If both name and version are provided, get specific document
-        if name and version:
-            doc = await doc_repo.get_by_name_version(name, version)
-            return [doc] if doc else []
-
-        # If only name is provided, get all versions of that document
-        if name:
-            all_docs = await doc_repo.list_all(offset=0, limit=1000)  # Get all for filtering
-            filtered = [d for d in all_docs if d.name == name]
-            return filtered[offset : offset + limit]
-
-        # Otherwise, list all documents with pagination
-        return await doc_repo.list_all(offset=offset, limit=limit)
+        search_results = await self._search_service.find_documents(query=query, limit=limit)
+        return [result.document for result in search_results]
 
     async def delete_document(self, document_id: int) -> bool:
         """
@@ -260,8 +243,7 @@ class ContextBridge:
             RuntimeError: If ContextBridge not initialized
         """
         self._check_initialized()
-        doc_repo = DocumentRepository(self._db_manager)
-        return await doc_repo.delete(document_id)
+        return await self._doc_manager.delete_document(document_id)
 
     # Page Operations
 
@@ -307,7 +289,11 @@ class ContextBridge:
     # Chunking Operations
 
     async def process_pages(
-        self, document_id: int, page_ids: List[int], chunk_size: Optional[int] = None
+        self,
+        document_id: int,
+        page_ids: List[int],
+        chunk_size: Optional[int] = None,
+        run_async: bool = True,
     ) -> ChunkProcessingResult:
         """
         Process pages for chunking and embedding.
@@ -319,6 +305,7 @@ class ContextBridge:
             document_id: Document ID
             page_ids: List of page IDs to process together
             chunk_size: Optional chunk size override
+            run_async: If True, run in background task. If False, run synchronously.
 
         Returns:
             ChunkProcessingResult with summary
@@ -329,8 +316,143 @@ class ContextBridge:
         """
         self._check_initialized()
         return await self._doc_manager.process_chunking(
-            document_id=document_id, page_ids=page_ids, chunk_size=chunk_size
+            document_id=document_id, page_ids=page_ids, chunk_size=chunk_size, run_async=run_async
         )
+
+    async def wait_for_chunking_completion(
+        self,
+        document_id: int,
+        page_ids: List[int],
+        timeout_seconds: int = 60,
+        poll_interval: float = 1.0,
+    ) -> Dict[str, Any]:
+        """
+        Wait for chunking processing to complete for specified pages.
+
+        Polls the page status until all pages are either 'chunked' or 'deleted',
+        or timeout is reached.
+
+        Args:
+            document_id: Document ID
+            page_ids: List of page IDs that were submitted for processing
+            timeout_seconds: Maximum time to wait in seconds
+            poll_interval: How often to check status in seconds
+
+        Returns:
+            Dictionary with completion status and statistics
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+
+        import time
+
+        start_time = time.time()
+
+        logger.info(
+            f"⏳ Waiting for chunking completion of {len(page_ids)} pages in document {document_id}"
+        )
+
+        while time.time() - start_time < timeout_seconds:
+            # Check status of all pages
+            all_pages = await self.list_pages(document_id)
+            page_status_map = {p.id: p.status for p in all_pages if p.id in page_ids}
+
+            # Count statuses
+            processing = sum(1 for status in page_status_map.values() if status == "processing")
+            chunked = sum(1 for status in page_status_map.values() if status == "chunked")
+            deleted = sum(1 for status in page_status_map.values() if status == "deleted")
+            pending = sum(1 for status in page_status_map.values() if status == "pending")
+
+            total_accounted = processing + chunked + deleted + pending
+
+            logger.debug(
+                f"Chunking status: processing={processing}, chunked={chunked}, deleted={deleted}, pending={pending}, total={total_accounted}/{len(page_ids)}"
+            )
+
+            # Check if all pages are done processing
+            if processing == 0 and total_accounted == len(page_ids):
+                # Get chunk count
+                chunk_repo = ChunkRepository(self._db_manager)
+                chunk_count = await chunk_repo.count_by_document(document_id)
+
+                elapsed = time.time() - start_time
+                result = {
+                    "completed": True,
+                    "elapsed_seconds": elapsed,
+                    "pages_processed": len(page_ids),
+                    "pages_chunked": chunked,
+                    "pages_deleted": deleted,
+                    "pages_pending": pending,
+                    "chunks_created": chunk_count,
+                    "timeout": False,
+                }
+
+                logger.info(
+                    f"✅ Chunking completed in {elapsed:.1f}s: {chunked} pages chunked, {chunk_count} chunks created"
+                )
+                return result
+
+            await asyncio.sleep(poll_interval)
+
+        # Timeout reached
+        elapsed = time.time() - start_time
+        logger.warning(f"⏰ Chunking wait timeout after {elapsed:.1f}s")
+
+        # Get final status
+        all_pages = await self.list_pages(document_id)
+        page_status_map = {p.id: p.status for p in all_pages if p.id in page_ids}
+
+        processing = sum(1 for status in page_status_map.values() if status == "processing")
+        chunked = sum(1 for status in page_status_map.values() if status == "chunked")
+        deleted = sum(1 for status in page_status_map.values() if status == "deleted")
+        pending = sum(1 for status in page_status_map.values() if status == "pending")
+
+        chunk_repo = ChunkRepository(self._db_manager)
+        chunk_count = await chunk_repo.count_by_document(document_id)
+
+        return {
+            "completed": False,
+            "elapsed_seconds": elapsed,
+            "pages_processed": len(page_ids),
+            "pages_chunked": chunked,
+            "pages_deleted": deleted,
+            "pages_pending": pending,
+            "pages_still_processing": processing,
+            "chunks_created": chunk_count,
+            "timeout": True,
+        }
+
+    async def get_chunk_stats(self, document_id: int) -> Dict[str, Any]:
+        """
+        Get chunk statistics for a document.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            Dictionary with chunk statistics
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+
+        chunk_repo = ChunkRepository(self._db_manager)
+        chunk_count = await chunk_repo.count_by_document(document_id)
+
+        # Get page status counts
+        all_pages = await self.list_pages(document_id)
+        page_stats = {}
+        for page in all_pages:
+            page_stats[page.status] = page_stats.get(page.status, 0) + 1
+
+        return {
+            "document_id": document_id,
+            "total_chunks": chunk_count,
+            "page_status_counts": page_stats,
+        }
 
     # Search Operations
 

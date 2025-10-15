@@ -76,7 +76,6 @@ Issues = "https://github.com/yourusername/context_bridge/issues"
 
 [project.scripts]
 context-bridge = "context_bridge.__main__:main"
-context-bridge-mcp = "context_bridge_mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["context_bridge"]

@@ -97,11 +97,11 @@ def _render_single_result(result: ContentSearchResult, query: str):
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            page_url = result.chunk.page_url or "N/A"
+            page_url = result.document_source_url or "N/A"
             if page_url != "N/A":
-                st.caption(f"📄 **Page:** [{page_url}]({page_url})")
+                st.caption(f"📄 **Source:** [{page_url}]({page_url})")
             else:
-                st.caption("📄 **Page:** N/A")
+                st.caption("📄 **Source:** N/A")
 
         with col2:
             st.caption(f"🆔 **Chunk ID:** {result.chunk.id}")
@@ -110,9 +110,29 @@ def _render_single_result(result: ContentSearchResult, query: str):
             st.caption(f"📅 **Created:** {result.chunk.created_at.strftime('%Y-%m-%d')}")
 
         with col4:
-            # View full page button
-            if st.button("🔗 View Full Page", key=f"view_page_{result.chunk.id}"):
-                _view_full_page(result)
+            # View source button
+            if st.button("🔗 View Source", key=f"view_source_{result.chunk.id}"):
+                _view_source(result)
+
+
+def _view_source(result: ContentSearchResult):
+    """
+    Open the document source URL in a new tab.
+
+    Args:
+        result: Search result containing document source URL
+    """
+    import streamlit as st
+
+    source_url = result.document_source_url
+    if source_url:
+        st.markdown(
+            f'<a href="{source_url}" target="_blank">🔗 Click here to view source</a>',
+            unsafe_allow_html=True,
+        )
+        st.info(f"Source URL: {source_url}")
+    else:
+        st.warning("No source URL available for this document")
 
 
 def _highlight_query_terms(content: str, query: str) -> str:

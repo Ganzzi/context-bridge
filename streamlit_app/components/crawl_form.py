@@ -27,8 +27,13 @@ def render_crawl_form(bridge: ContextBridge):
 
     show_info(
         "Enter the details below to crawl and add new documentation to your library. "
-        "The crawler will automatically discover and store all pages from the provided URL."
+        "The crawler will follow internal links up to the specified depth from each URL. "
+        "Fragment duplicates (e.g., #section-name) are automatically filtered."
     )
+
+    # Initialize crawl result in session state if not exists
+    if "crawl_result" not in st.session_state:
+        st.session_state.crawl_result = None
 
     with st.form("crawl_form"):
         name = st.text_input(
@@ -48,6 +53,12 @@ def render_crawl_form(bridge: ContextBridge):
             "Description (optional)",
             placeholder="Brief description of this documentation...",
             help="Optional description to help identify this documentation",
+        )
+        additional_urls_text = st.text_area(
+            "Additional URLs (optional)",
+            placeholder="https://example.com/api-docs\nhttps://example.com/tutorials\nOne URL per line",
+            help="Additional starting URLs to crawl. Each URL will be crawled with the specified max depth, following internal links. Fragment duplicates are automatically filtered.",
+            height=100,
         )
         max_depth = st.slider(
             "Max Crawl Depth",
@@ -81,6 +92,18 @@ def render_crawl_form(bridge: ContextBridge):
             elif not url.startswith(("http://", "https://")):
                 errors.append("URL must start with http:// or https://")
 
+            # Validate additional URLs
+            additional_urls = []
+            if additional_urls_text.strip():
+                url_lines = [
+                    line.strip() for line in additional_urls_text.split("\n") if line.strip()
+                ]
+                for i, url_line in enumerate(url_lines, 1):
+                    if not url_line.startswith(("http://", "https://")):
+                        errors.append(f"Additional URL {i} must start with http:// or https://")
+                    else:
+                        additional_urls.append(url_line)
+
             # Show all validation errors
             if errors:
                 for error in errors:
@@ -97,6 +120,9 @@ def render_crawl_form(bridge: ContextBridge):
                     status_text.text("🔍 Initializing crawler...")
 
                     # Run crawling in asyncio event loop
+                    # Use WindowsProactorEventLoopPolicy for Windows to support subprocesses
+                    if sys.platform == "win32":
+                        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
 
@@ -113,6 +139,7 @@ def render_crawl_form(bridge: ContextBridge):
                                 source_url=url.strip(),
                                 description=description.strip() if description else None,
                                 max_depth=max_depth,
+                                additional_urls=additional_urls if additional_urls else None,
                             )
                         )
 
@@ -121,6 +148,9 @@ def render_crawl_form(bridge: ContextBridge):
 
                         # Invalidate documents cache
                         CacheManager.invalidate(prefix="documents")
+
+                        # Store result in session state for button access
+                        st.session_state.crawl_result = result
 
                         # Display results
                         show_success("Crawling completed successfully!")
@@ -142,11 +172,6 @@ def render_crawl_form(bridge: ContextBridge):
                             show_info(
                                 f"Document '{result.document_name} v{result.document_version}' has been added to your library."
                             )
-
-                            # Add button to view the document
-                            if st.button("👀 View Pages", key=f"view_crawled_{result.document_id}"):
-                                st.session_state.selected_document = result.document_id
-                                st.switch_page("pages/crawled_pages.py")
 
                     finally:
                         loop.close()
@@ -170,3 +195,11 @@ def render_crawl_form(bridge: ContextBridge):
                 show_info(
                     "Please check your URL and try again. Make sure the website allows crawling and is accessible."
                 )
+
+    # Display view button outside the form if we have a successful crawl result
+    if st.session_state.crawl_result:
+        if st.button(
+            "👀 View Pages", key=f"view_crawled_{st.session_state.crawl_result.document_id}"
+        ):
+            st.session_state.selected_document = st.session_state.crawl_result.document_id
+            st.switch_page("pages/crawled_pages.py")

@@ -339,6 +339,41 @@ class PageRepository:
             logger.error(f"Failed to bulk update {len(page_ids)} pages to status '{status}': {e}")
             raise
 
+    async def update_group_id_bulk(self, page_ids: List[int], group_id: UUID) -> int:
+        """
+        Update group_id for multiple pages.
+
+        Args:
+            page_ids: List of page IDs to update
+            group_id: UUID to assign to all pages
+
+        Returns:
+            Number of pages updated
+
+        Raises:
+            Exception: Database errors
+        """
+        try:
+            if not page_ids:
+                logger.warning("update_group_id_bulk called with empty page_ids list")
+                return 0
+
+            # Build query with IN clause
+            placeholders = ", ".join(f"${i+2}" for i in range(len(page_ids)))
+            query = f"UPDATE pages SET group_id = $1 WHERE id IN ({placeholders})"
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [group_id] + page_ids)
+                # For UPDATE queries, PSQLPy returns an empty list on success
+                # We assume all requested pages were updated if no exception
+                count = len(page_ids)
+
+                logger.info(f"Updated {count} pages with group_id '{group_id}'")
+                return count
+        except Exception as e:
+            logger.error(f"Failed to bulk update {len(page_ids)} pages with group_id: {e}")
+            raise
+
     async def delete(self, page_id: int) -> bool:
         """
         Soft delete page (mark as deleted).
@@ -414,15 +449,15 @@ class PageRepository:
             logger.error(f"Failed to check duplicates for {len(content_hashes)} hashes: {e}")
             raise
 
-    async def get_combined_content(
-        self, page_ids: List[int], separator: str = "\n\n---\n\n"
-    ) -> str:
+    async def get_combined_content(self, page_ids: List[int], separator: str = "\n\n") -> str:
         """
         Fetch and combine content from multiple pages.
 
         Args:
             page_ids: List of page IDs to fetch
             separator: Separator to use between page contents
+                      Default is "\n\n" which preserves markdown structure
+                      better than "---" which looks like a horizontal rule
 
         Returns:
             Combined content string
@@ -434,22 +469,31 @@ class PageRepository:
             if not page_ids:
                 return ""
 
-            # Build query with IN clause
+            # Build query with IN clause - include URL for metadata
             placeholders = ", ".join(f"${i+1}" for i in range(len(page_ids)))
             query = f"""
-                SELECT content
+                SELECT id, url, content
                 FROM pages
                 WHERE id IN ({placeholders})
-                ORDER BY id
+                ORDER BY url
             """
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, page_ids)
                 rows = result.result()
-                contents = [row["content"] for row in rows if row["content"]]
-                combined = separator.join(contents)
+
+                # Add metadata comments before each page's content
+                # This helps with context and debugging, but won't interfere with chunking
+                combined_parts = []
+                for row in rows:
+                    if row["content"]:
+                        # Add a comment with source URL (markdown comment won't render)
+                        combined_parts.append(f"<!-- Source: {row['url']} -->")
+                        combined_parts.append(row["content"])
+
+                combined = separator.join(combined_parts)
                 logger.debug(
-                    f"Combined content from {len(contents)} pages (total length: {len(combined)})"
+                    f"Combined content from {len(rows)} pages (total length: {len(combined)})"
                 )
                 return combined
         except Exception as e:

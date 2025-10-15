@@ -26,6 +26,7 @@ class ContentSearchResult(BaseModel):
     chunk: Chunk
     document_name: str
     document_version: str
+    document_source_url: str
     score: float
     rank: int
 
@@ -166,6 +167,7 @@ class SearchService:
                     chunk=chunk_result.chunk,
                     document_name=document.name,
                     document_version=document.version,
+                    document_source_url=document.source_url,
                     score=chunk_result.score,
                     rank=chunk_result.rank,
                 )
@@ -238,6 +240,7 @@ class SearchService:
                             chunk=chunk_result.chunk,
                             document_name=document.name,
                             document_version=document.version,
+                            document_source_url=document.source_url,
                             score=chunk_result.score,
                             rank=chunk_result.rank,
                         )

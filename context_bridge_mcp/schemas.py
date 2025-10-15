@@ -6,10 +6,9 @@ from typing import Any
 # Input schemas
 FIND_DOCUMENTS_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "required": ["query"],
     "properties": {
         "query": {"type": "string", "description": "Search query for document name/description"},
-        "name": {"type": "string", "description": "Exact document name"},
-        "version": {"type": "string", "description": "Document version"},
         "limit": {
             "type": "integer",
             "description": "Maximum results",

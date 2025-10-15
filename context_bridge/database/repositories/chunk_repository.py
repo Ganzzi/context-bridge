@@ -264,6 +264,33 @@ class ChunkRepository:
             logger.error(f"Failed to count chunks for document {document_id}: {e}")
             raise
 
+    async def get_max_chunk_index(self, document_id: int) -> int:
+        """
+        Get the maximum chunk_index for a document.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            Maximum chunk_index, or -1 if no chunks exist
+
+        Raises:
+            Exception: Database errors
+        """
+        try:
+            query = "SELECT MAX(chunk_index) as max_index FROM chunks WHERE document_id = $1"
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [document_id])
+                rows = result.result()
+                max_index = (
+                    rows[0]["max_index"] if rows and rows[0]["max_index"] is not None else -1
+                )
+                logger.debug(f"Max chunk_index for document {document_id}: {max_index}")
+                return max_index
+        except Exception as e:
+            logger.error(f"Failed to get max chunk_index for document {document_id}: {e}")
+            raise
+
     async def vector_search(
         self,
         document_id: int,

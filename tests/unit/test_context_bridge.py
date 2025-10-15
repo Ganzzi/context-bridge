@@ -186,6 +186,35 @@ class TestContextBridge:
             source_url="https://example.com",
             description=None,
             max_depth=None,
+            additional_urls=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_crawl_documentation_with_additional_urls(self, context_bridge, mock_doc_manager):
+        """Test document crawling with additional URLs."""
+        # Setup mock
+        result = MagicMock(spec=CrawlAndStoreResult)
+        result.document_id = 1
+        mock_doc_manager.crawl_and_store.return_value = result
+
+        # Execute
+        additional_urls = ["https://example.com/api", "https://example.com/docs"]
+        response = await context_bridge.crawl_documentation(
+            name="test-doc",
+            version="1.0.0",
+            source_url="https://example.com",
+            additional_urls=additional_urls,
+        )
+
+        # Verify
+        assert response == result
+        mock_doc_manager.crawl_and_store.assert_called_once_with(
+            name="test-doc",
+            version="1.0.0",
+            source_url="https://example.com",
+            description=None,
+            max_depth=None,
+            additional_urls=additional_urls,
         )
 
     @pytest.mark.asyncio

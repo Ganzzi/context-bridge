@@ -142,32 +142,19 @@ if selected_doc_id:
 
             df = pd.DataFrame(df_data)
 
-            # Display DataFrame
-            st.dataframe(
-                df,
-                use_container_width=True,
-                column_config={
-                    "ID": st.column_config.NumberColumn("ID", width="small"),
-                    "URL": st.column_config.LinkColumn("URL", width="large"),
-                    "Size (chars)": st.column_config.NumberColumn("Size (chars)", width="medium"),
-                    "Status": st.column_config.TextColumn("Status", width="small"),
-                    "Crawled": st.column_config.DatetimeColumn("Crawled", width="medium"),
-                },
-            )
-
             # Selection controls
-            st.subheader("Page Selection for Chunking")
+            st.subheader("📋 Page Selection for Chunking")
 
             # Select All / Clear All buttons
-            col_select1, col_select2, col_select3 = st.columns([1, 1, 2])
+            col_select1, col_select2, col_select3 = st.columns([1, 1, 3])
 
             with col_select1:
-                if st.button("Select All", key="select_all_pages"):
+                if st.button("✅ Select All", key="select_all_pages", use_container_width=True):
                     st.session_state.selected_pages = [page.id for page in pages]
                     st.rerun()
 
             with col_select2:
-                if st.button("Clear All", key="clear_all_pages"):
+                if st.button("❌ Clear All", key="clear_all_pages", use_container_width=True):
                     st.session_state.selected_pages = []
                     st.rerun()
 
@@ -180,41 +167,72 @@ if selected_doc_id:
                 )
                 st.metric("Selected", f"{selected_count} pages", f"{total_size:,} chars")
 
-            # Individual page checkboxes
-            st.write("Select pages to process:")
-            cols = st.columns(2)
+            # Individual page selection with improved layout
+            st.write("**Select pages to process:**")
 
-            for i, page in enumerate(pages):
-                with cols[i % 2]:
-                    is_selected = page.id in st.session_state.selected_pages
-                    if st.checkbox(
-                        f"Page {page.id}: {page.url[:50]}... ({page.content_length} chars)",
-                        value=is_selected,
-                        key=f"page_{page.id}",
-                    ):
-                        if page.id not in st.session_state.selected_pages:
+            # Sort pages by URL for better organization
+            sorted_pages = sorted(pages, key=lambda p: p.url)
+
+            # Display pages in a single column with better formatting
+            for page in sorted_pages:
+                is_selected = page.id in st.session_state.selected_pages
+
+                # Create a container for each page
+                with st.container():
+                    col_check, col_info = st.columns([0.5, 9.5])
+
+                    with col_check:
+                        # Checkbox for selection
+                        selected = st.checkbox(
+                            "Select",
+                            value=is_selected,
+                            key=f"page_{page.id}",
+                            label_visibility="collapsed",
+                        )
+
+                        # Update selection state
+                        if selected and page.id not in st.session_state.selected_pages:
                             st.session_state.selected_pages.append(page.id)
-                    else:
-                        if page.id in st.session_state.selected_pages:
+                        elif not selected and page.id in st.session_state.selected_pages:
                             st.session_state.selected_pages.remove(page.id)
+
+                    with col_info:
+                        # Display page info with full URL visible
+                        status_emoji = {
+                            "pending": "⏳",
+                            "processing": "⚙️",
+                            "chunked": "✅",
+                            "deleted": "🗑️",
+                        }.get(page.status, "❓")
+
+                        st.markdown(
+                            f"{status_emoji} **ID {page.id}**: [{page.url}]({page.url})  \n"
+                            f"📊 Size: {page.content_length:,} chars | "
+                            f"📅 Crawled: {page.crawled_at.strftime('%Y-%m-%d %H:%M')}"
+                        )
+
+                    st.divider()
 
             # Chunk Processing Section
             if st.session_state.selected_pages:
                 st.divider()
                 st.subheader("⚙️ Process Selected Pages")
 
-                # Selected pages summary
+                # Selected pages summary - sorted by URL
                 selected_pages_info = [
                     page for page in pages if page.id in st.session_state.selected_pages
                 ]
+                # Sort by URL to ensure logical order (root first, then alphabetically)
+                selected_pages_info.sort(key=lambda p: p.url)
+
                 total_chars = sum(page.content_length for page in selected_pages_info)
 
                 with st.expander("📊 Selected Pages Summary", expanded=True):
                     st.write(f"**Selected:** {len(selected_pages_info)} pages")
                     st.write(f"**Total content:** {total_chars:,} characters")
 
-                    # Show selected page URLs
-                    st.write("**Pages to process:**")
+                    # Show selected page URLs in sorted order
+                    st.write("**Pages to process (in order):**")
                     for page in selected_pages_info:
                         st.write(f"- {page.url} ({page.content_length:,} chars)")
 
@@ -225,8 +243,8 @@ if selected_doc_id:
                     chunk_size = st.number_input(
                         "Chunk Size (characters)",
                         min_value=100,
-                        max_value=2000,
-                        value=1000,
+                        max_value=3000,
+                        value=2000,
                         step=100,
                         help="Maximum characters per chunk",
                     )
@@ -257,43 +275,57 @@ if selected_doc_id:
                                     asyncio.set_event_loop(loop)
 
                                     # Update progress
-                                    progress_bar.progress(25)
-                                    status_text.text("Starting chunk processing...")
+                                    progress_bar.progress(10)
+                                    status_text.text("Validating pages...")
 
-                                    # Process the pages
+                                    # Process the pages synchronously
+                                    progress_bar.progress(20)
+                                    status_text.text("Processing pages into chunks...")
+
                                     result = loop.run_until_complete(
                                         bridge.process_pages(
                                             document_id=selected_doc_id,
                                             page_ids=st.session_state.selected_pages,
                                             chunk_size=chunk_size,
+                                            run_async=False,  # Run synchronously for Streamlit
                                         )
                                     )
                                     loop.close()
 
                                     progress_bar.progress(100)
-                                    status_text.text("Chunking completed!")
+                                    status_text.text("Chunking process completed!")
 
                                     # Display results
-                                    st.success("✅ Chunking completed successfully!")
+                                    st.success("✅ Chunking process completed successfully!")
 
                                     with st.expander("📊 Processing Results", expanded=True):
-                                        col_res1, col_res2, col_res3 = st.columns(3)
+                                        col_res1, col_res2 = st.columns(2)
                                         with col_res1:
                                             st.metric("Pages Processed", result.pages_processed)
                                         with col_res2:
-                                            st.metric("Chunks Created", result.chunks_created)
-                                        with col_res3:
-                                            st.metric(
-                                                "Embeddings Generated", result.embeddings_created
-                                            )
+                                            st.metric("Document ID", result.document_id)
 
-                                        if hasattr(result, "errors") and result.errors > 0:
+                                        # Get chunk statistics
+                                        try:
+                                            stats_loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(stats_loop)
+                                            stats = stats_loop.run_until_complete(
+                                                bridge.get_chunk_stats(selected_doc_id)
+                                            )
+                                            stats_loop.close()
+                                            st.metric("Chunks Created", stats["total_chunks"])
+                                            st.write("Page Status Summary:")
+                                            for status, count in stats[
+                                                "page_status_counts"
+                                            ].items():
+                                                st.write(f"- {status}: {count} pages")
+                                        except Exception as stats_error:
                                             st.warning(
-                                                f"⚠️ {result.errors} errors occurred during processing"
+                                                f"Could not retrieve chunk statistics: {stats_error}"
                                             )
 
                                         st.info(
-                                            "Pages have been processed into searchable chunks with embeddings."
+                                            "🎉 Chunking completed! You can now search through the processed content."
                                         )
 
                                         # Clear selection after successful processing

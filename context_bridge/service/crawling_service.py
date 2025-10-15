@@ -101,7 +101,11 @@ class CrawlingService:
         self.url_service = url_service
 
     async def crawl_webpage(
-        self, crawler: AsyncWebCrawler, url: str, depth: Optional[int] = None
+        self,
+        crawler: AsyncWebCrawler,
+        url: str,
+        depth: Optional[int] = None,
+        follow_links: bool = True,
     ) -> CrawlBatchResult:
         """Crawl a webpage with automatic type detection and dispatch.
 
@@ -109,6 +113,7 @@ class CrawlingService:
             crawler: AsyncWebCrawler instance to use for crawling
             url: URL to crawl
             depth: Optional override for max_depth from config (1-10)
+            follow_links: Whether to follow internal links recursively
 
         Returns:
             CrawlBatchResult: Results of the crawl operation
@@ -150,7 +155,7 @@ class CrawlingService:
             if crawl_type == CrawlType.WEBPAGE:
                 logger.info("Dispatching to webpage crawler")
                 return await self._crawl_recursive_internal_links(
-                    crawler, normalized_url, crawl_depth
+                    crawler, normalized_url, crawl_depth, follow_links
                 )
             elif crawl_type == CrawlType.SITEMAP:
                 logger.info("Dispatching to sitemap crawler")
@@ -162,7 +167,7 @@ class CrawlingService:
                 # Fallback to webpage crawling
                 logger.warning(f"Unknown crawl type {crawl_type}, falling back to webpage")
                 return await self._crawl_recursive_internal_links(
-                    crawler, normalized_url, crawl_depth
+                    crawler, normalized_url, crawl_depth, follow_links
                 )
 
         except Exception as e:
@@ -177,19 +182,23 @@ class CrawlingService:
             )
 
     async def _crawl_recursive_internal_links(
-        self, crawler: AsyncWebCrawler, url: str, max_depth: int
+        self, crawler: AsyncWebCrawler, url: str, max_depth: int, follow_links: bool = True
     ) -> CrawlBatchResult:
         """Crawl a webpage recursively following internal links.
 
         Args:
             crawler: AsyncWebCrawler instance
             url: Starting URL to crawl
+            max_depth: Maximum depth to follow links
+            follow_links: Whether to follow internal links
 
         Returns:
             CrawlBatchResult: Results of the recursive crawl
         """
         logger.info(f"Starting recursive crawl from {url} with max_depth={max_depth}")
 
+        # Normalize URL by removing fragment
+        url = url.split("#")[0]
         visited = set()
         to_visit = [url]
         results = []
@@ -217,10 +226,19 @@ class CrawlingService:
                     try:
                         result = await crawler.arun(url=page_url)
                         if result.success and result.markdown:
+                            # Extract the markdown content
+                            markdown_str = None
+                            if hasattr(result.markdown, "markdown"):
+                                markdown_str = result.markdown.markdown
+                            elif hasattr(result.markdown, "content"):
+                                markdown_str = result.markdown.content
+                            else:
+                                markdown_str = str(result.markdown)
+
                             # Extract internal links for next depth
-                            internal_links = self._extract_internal_links(result.markdown, page_url)
+                            internal_links = self._extract_internal_links(markdown_str, page_url)
                             return (
-                                CrawlResult(url=page_url, markdown=result.markdown),
+                                CrawlResult(url=page_url, markdown=markdown_str),
                                 internal_links,
                             )
                         else:
@@ -240,10 +258,11 @@ class CrawlingService:
                     if crawl_result:
                         results.append(crawl_result)
                         successful_count += 1
-                        # Add new internal links for next depth
-                        for link in internal_links:
-                            if link not in visited and link not in to_visit:
-                                to_visit.append(link)
+                        # Add new internal links for next depth if following links
+                        if follow_links:
+                            for link in internal_links:
+                                if link not in visited and link not in to_visit:
+                                    to_visit.append(link)
                     else:
                         failed_count += 1
                 else:
@@ -280,7 +299,6 @@ class CrawlingService:
         # Extract markdown links [text](url)
         link_pattern = r"\[([^\]]+)\]\(([^)]+)\)"
         matches = re.findall(link_pattern, markdown)
-
         for _, url in matches:
             # Skip anchor links
             if url.startswith("#"):
@@ -289,6 +307,9 @@ class CrawlingService:
             # Resolve relative URLs
             if not url.startswith(("http://", "https://")):
                 url = urljoin(base_url, url)
+
+            # Normalize by removing fragment
+            url = url.split("#")[0]
 
             # Only include links from the same domain
             if urlparse(url).netloc == base_parsed.netloc:
@@ -343,7 +364,16 @@ class CrawlingService:
                     try:
                         result = await crawler.arun(url=crawl_url)
                         if result.success and result.markdown:
-                            return CrawlResult(url=crawl_url, markdown=result.markdown)
+                            # Try different ways to get the content
+                            markdown_str = None
+                            if hasattr(result.markdown, "markdown"):
+                                markdown_str = result.markdown.markdown
+                            elif hasattr(result.markdown, "content"):
+                                markdown_str = result.markdown.content
+                            else:
+                                markdown_str = str(result.markdown)
+
+                            return CrawlResult(url=crawl_url, markdown=markdown_str)
                         return None
                     except Exception as e:
                         logger.error(f"Error crawling {crawl_url}: {e}")
@@ -426,7 +456,16 @@ class CrawlingService:
             # For text files, we can use the crawler directly
             result = await crawler.arun(url=url)
             if result.success and result.markdown:
-                crawl_result = CrawlResult(url=url, markdown=result.markdown)
+                # Extract the markdown content
+                markdown_str = None
+                if hasattr(result.markdown, "markdown"):
+                    markdown_str = result.markdown.markdown
+                elif hasattr(result.markdown, "content"):
+                    markdown_str = result.markdown.content
+                else:
+                    markdown_str = str(result.markdown)
+
+                crawl_result = CrawlResult(url=url, markdown=markdown_str)
                 return CrawlBatchResult(
                     results=[crawl_result],
                     crawl_type=CrawlType.TEXT_FILE,
