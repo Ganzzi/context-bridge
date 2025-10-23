@@ -15,7 +15,7 @@ root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
 import mcp.server.stdio
-from context_bridge_mcp import server
+from context_bridge_mcp.server import server
 
 
 async def main():

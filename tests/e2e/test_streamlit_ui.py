@@ -99,7 +99,7 @@ class TestDocumentManagement:
     def test_documents_page_loads(self, streamlit_page: Page):
         """Test that documents page loads with all elements."""
         # Navigate to documents page
-        streamlit_page.get_by_text("📚 Documents").click()
+        streamlit_page.get_by_text("📚 Documents").first.click()
         streamlit_page.wait_for_load_state("networkidle")
 
         # Check for tabs
@@ -109,7 +109,7 @@ class TestDocumentManagement:
     def test_document_list_displays(self, streamlit_page: Page):
         """Test that document list is displayed."""
         # Navigate to documents page
-        streamlit_page.get_by_text("📚 Documents").click()
+        streamlit_page.get_by_text("📚 Documents").first.click()
         streamlit_page.wait_for_load_state("networkidle")
 
         # Check for document list or empty state message
@@ -120,7 +120,7 @@ class TestDocumentManagement:
     def test_crawl_form_exists(self, streamlit_page: Page):
         """Test that crawl form is accessible."""
         # Navigate to documents page
-        streamlit_page.get_by_text("📚 Documents").click()
+        streamlit_page.get_by_text("📚 Documents").first.click()
         streamlit_page.wait_for_load_state("networkidle")
 
         # Click on Crawl New tab
@@ -135,7 +135,7 @@ class TestDocumentManagement:
     def test_search_filter_exists(self, streamlit_page: Page):
         """Test that search/filter controls exist on documents page."""
         # Navigate to documents page
-        streamlit_page.get_by_text("📚 Documents").click()
+        streamlit_page.get_by_text("📚 Documents").first.click()
         streamlit_page.wait_for_load_state("networkidle")
 
         # Check for search/filter controls
@@ -182,7 +182,7 @@ class TestSearchInterface:
     def test_search_page_loads(self, streamlit_page: Page):
         """Test that search page loads successfully."""
         # Navigate to search page
-        streamlit_page.get_by_text("🔍 Search").click()
+        streamlit_page.get_by_text("🔍 Search").first.click()
         streamlit_page.wait_for_load_state("networkidle")
 
         # Check page loaded
@@ -191,7 +191,7 @@ class TestSearchInterface:
     def test_search_form_exists(self, streamlit_page: Page):
         """Test that search form is present."""
         # Navigate to search page
-        streamlit_page.get_by_text("🔍 Search").click()
+        streamlit_page.get_by_text("🔍 Search").first.click()
         streamlit_page.wait_for_load_state("networkidle")
 
         # Check for search form elements
@@ -201,7 +201,7 @@ class TestSearchInterface:
     def test_document_filter_exists(self, streamlit_page: Page):
         """Test that document filter exists on search page."""
         # Navigate to search page
-        streamlit_page.get_by_text("🔍 Search").click()
+        streamlit_page.get_by_text("🔍 Search").first.click()
         streamlit_page.wait_for_load_state("networkidle")
 
         # Check for filter options
@@ -230,7 +230,7 @@ class TestResponsiveness:
         pages_to_test = ["📚 Documents", "📄 Crawled Pages", "🔍 Search"]
 
         for page_name in pages_to_test:
-            streamlit_page.get_by_text(page_name).click()
+            streamlit_page.get_by_text(page_name).first.click()
             streamlit_page.wait_for_load_state("networkidle")
             # Should load within default timeout
             assert streamlit_page.url is not None
@@ -246,21 +246,21 @@ class TestEndToEndWorkflows:
         expect(streamlit_page.get_by_text("🌉 Context Bridge")).to_be_visible()
 
         # Navigate to Documents
-        streamlit_page.get_by_text("📚 Documents").click()
+        streamlit_page.get_by_text("📚 Documents").first.click()
         streamlit_page.wait_for_load_state("networkidle")
         expect(streamlit_page.get_by_text("Document Management", exact=False)).to_be_visible()
 
         # Navigate to Pages
-        streamlit_page.get_by_text("📄 Crawled Pages").click()
+        streamlit_page.get_by_text("📄 Crawled Pages").first.click()
         streamlit_page.wait_for_load_state("networkidle")
         expect(streamlit_page.get_by_text("Page Management", exact=False)).to_be_visible()
 
         # Navigate to Search
-        streamlit_page.get_by_text("🔍 Search").click()
+        streamlit_page.get_by_text("🔍 Search").first.click()
         streamlit_page.wait_for_load_state("networkidle")
         expect(streamlit_page.get_by_text("Search Documentation", exact=False)).to_be_visible()
 
         # Navigate back to home
-        streamlit_page.get_by_text("🏠 Home").click()
+        streamlit_page.get_by_text("🏠 Home").first.click()
         streamlit_page.wait_for_load_state("networkidle")
         expect(streamlit_page.get_by_text("🌉 Context Bridge")).to_be_visible()

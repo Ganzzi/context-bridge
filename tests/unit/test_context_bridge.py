@@ -46,6 +46,7 @@ def mock_doc_manager():
     manager.crawl_and_store = AsyncMock()
     manager.list_pages = AsyncMock()
     manager.delete_page = AsyncMock()
+    manager.delete_document = AsyncMock()
     manager.process_chunking = AsyncMock()
     manager.embedding_service = MagicMock()
     manager.embedding_service.verify_connection = AsyncMock(return_value=True)
@@ -257,18 +258,17 @@ class TestContextBridge:
         mock_doc_repo.get_by_name_version.assert_called_once_with("test-doc", "1.0.0")
 
     @pytest.mark.asyncio
-    async def test_delete_document(self, context_bridge, mock_doc_repo):
+    async def test_delete_document(self, context_bridge, mock_doc_manager):
         """Test deleting a document."""
         # Setup mock
-        mock_doc_repo.delete.return_value = True
+        mock_doc_manager.delete_document.return_value = True
 
         # Execute
-        with patch("context_bridge.core.DocumentRepository", return_value=mock_doc_repo):
-            result = await context_bridge.delete_document(123)
+        result = await context_bridge.delete_document(123)
 
         # Verify
         assert result is True
-        mock_doc_repo.delete.assert_called_once_with(123)
+        mock_doc_manager.delete_document.assert_called_once_with(123)
 
     @pytest.mark.asyncio
     async def test_list_pages(self, context_bridge, mock_doc_manager):
@@ -318,7 +318,7 @@ class TestContextBridge:
         # Verify
         assert response == result
         mock_doc_manager.process_chunking.assert_called_once_with(
-            document_id=1, page_ids=[1, 2, 3, 4, 5], chunk_size=1500
+            document_id=1, page_ids=[1, 2, 3, 4, 5], chunk_size=1500, run_async=True
         )
 
     @pytest.mark.asyncio

@@ -8,9 +8,15 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from typing import List
+from uuid import uuid4
 
 from context_bridge.config import Config
-from context_bridge.service.doc_manager import DocManager, CrawlAndStoreResult, ChunkProcessingResult, PageInfo
+from context_bridge.service.doc_manager import (
+    DocManager,
+    CrawlAndStoreResult,
+    ChunkProcessingResult,
+    PageInfo,
+)
 from context_bridge.database.repositories.document_repository import DocumentRepository
 from context_bridge.database.repositories.page_repository import PageRepository
 from context_bridge.database.repositories.chunk_repository import ChunkRepository
@@ -26,6 +32,8 @@ def mock_config():
     config.chunk_size = 2000
     config.min_combined_content_size = 100
     config.max_combined_content_size = 50000
+    config.crawl_max_depth = 3
+    config.crawl_max_concurrent = 10
     return config
 
 
@@ -81,7 +89,16 @@ def mock_chunk_repo():
 
 
 @pytest.fixture
-def doc_manager(mock_db_manager, mock_crawling_service, mock_chunking_service, mock_embedding_service, mock_config, mock_doc_repo, mock_page_repo, mock_chunk_repo):
+def doc_manager(
+    mock_db_manager,
+    mock_crawling_service,
+    mock_chunking_service,
+    mock_embedding_service,
+    mock_config,
+    mock_doc_repo,
+    mock_page_repo,
+    mock_chunk_repo,
+):
     """Create a DocManager instance with mocked dependencies."""
     manager = DocManager(
         db_manager=mock_db_manager,
@@ -103,7 +120,9 @@ class TestDocManager:
     """Unit tests for DocManager with mocked dependencies."""
 
     @pytest.mark.asyncio
-    async def test_crawl_and_store_new_document(self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service):
+    async def test_crawl_and_store_new_document(
+        self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service
+    ):
         """Test crawling and storing a new document."""
         # Setup mocks
         mock_doc_repo.get_by_name_version.return_value = None
@@ -123,7 +142,7 @@ class TestDocManager:
             name="test-doc",
             version="1.0.0",
             source_url="https://example.com",
-            description="Test document"
+            description="Test document",
         )
 
         # Verify
@@ -140,7 +159,9 @@ class TestDocManager:
         assert mock_page_repo.create.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_crawl_and_store_existing_document(self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service):
+    async def test_crawl_and_store_existing_document(
+        self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service
+    ):
         """Test crawling when document already exists."""
         # Setup mocks
         existing_doc = MagicMock()
@@ -157,9 +178,7 @@ class TestDocManager:
 
         # Execute
         result = await doc_manager.crawl_and_store(
-            name="test-doc",
-            version="1.0.0",
-            source_url="https://example.com"
+            name="test-doc", version="1.0.0", source_url="https://example.com"
         )
 
         # Verify
@@ -170,7 +189,9 @@ class TestDocManager:
         mock_page_repo.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_crawl_and_store_with_duplicates(self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service):
+    async def test_crawl_and_store_with_duplicates(
+        self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service
+    ):
         """Test crawling with duplicate pages."""
         # Setup mocks
         mock_doc_repo.get_by_name_version.return_value = None
@@ -183,13 +204,13 @@ class TestDocManager:
         ]
         mock_crawling_service.crawl_webpage.return_value = crawl_result
 
-        mock_page_repo.get_by_url.return_value = MagicMock()  # First call returns existing, second returns None
+        mock_page_repo.get_by_url.return_value = (
+            MagicMock()
+        )  # First call returns existing, second returns None
 
         # Execute
         result = await doc_manager.crawl_and_store(
-            name="test-doc",
-            version="1.0.0",
-            source_url="https://example.com"
+            name="test-doc", version="1.0.0", source_url="https://example.com"
         )
 
         # Verify
@@ -200,7 +221,9 @@ class TestDocManager:
         mock_page_repo.create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_crawl_and_store_with_errors(self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service):
+    async def test_crawl_and_store_with_errors(
+        self, doc_manager, mock_doc_repo, mock_page_repo, mock_crawling_service
+    ):
         """Test crawling with page storage errors."""
         # Setup mocks
         mock_doc_repo.get_by_name_version.return_value = None
@@ -217,9 +240,7 @@ class TestDocManager:
 
         # Execute
         result = await doc_manager.crawl_and_store(
-            name="test-doc",
-            version="1.0.0",
-            source_url="https://example.com"
+            name="test-doc", version="1.0.0", source_url="https://example.com"
         )
 
         # Verify
@@ -232,8 +253,20 @@ class TestDocManager:
         """Test listing pages for a document."""
         # Setup mocks
         mock_pages = [
-            MagicMock(id=1, url="https://example.com/page1", content_length=1000, status="pending", crawled_at=MagicMock()),
-            MagicMock(id=2, url="https://example.com/page2", content_length=2000, status="chunked", crawled_at=MagicMock()),
+            MagicMock(
+                id=1,
+                url="https://example.com/page1",
+                content_length=1000,
+                status="pending",
+                crawled_at=MagicMock(),
+            ),
+            MagicMock(
+                id=2,
+                url="https://example.com/page2",
+                content_length=2000,
+                status="chunked",
+                crawled_at=MagicMock(),
+            ),
         ]
         mock_page_repo.list_by_document.return_value = mock_pages
 
@@ -247,7 +280,9 @@ class TestDocManager:
         assert result[0].url == "https://example.com/page1"
         assert result[0].status == "pending"
 
-        mock_page_repo.list_by_document.assert_called_once_with(1, status="pending", offset=0, limit=10)
+        mock_page_repo.list_by_document.assert_called_once_with(
+            1, status="pending", offset=0, limit=10
+        )
 
     @pytest.mark.asyncio
     async def test_delete_page(self, doc_manager, mock_page_repo):
@@ -271,10 +306,7 @@ class TestDocManager:
 
         # Execute
         result = await doc_manager.process_chunking(
-            document_id=1,
-            page_ids=[1, 2, 3],
-            chunk_size=1000,
-            batch_enabled=True
+            document_id=1, page_ids=[1, 2, 3], chunk_size=1000, batch_enabled=True
         )
 
         # Verify
@@ -282,7 +314,9 @@ class TestDocManager:
         assert result.document_id == 1
         assert result.pages_processed == 3
 
-        mock_page_repo.validate_pages_for_chunking.assert_called_once_with([1, 2, 3], min_size=100, max_size=50000)
+        mock_page_repo.validate_pages_for_chunking.assert_called_once_with(
+            [1, 2, 3], min_size=100, max_size=50000
+        )
         mock_page_repo.update_status_bulk.assert_called_once_with([1, 2, 3], "processing")
 
     @pytest.mark.asyncio
@@ -293,47 +327,60 @@ class TestDocManager:
 
         # Execute and verify
         with pytest.raises(ValueError, match="Page validation failed: Invalid pages"):
-            await doc_manager.process_chunking(
-                document_id=1,
-                page_ids=[1, 2, 3]
-            )
+            await doc_manager.process_chunking(document_id=1, page_ids=[1, 2, 3])
 
         mock_page_repo.validate_pages_for_chunking.assert_called_once()
         mock_page_repo.update_status_bulk.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_process_chunking_background_batch_mode(self, doc_manager, mock_page_repo, mock_chunk_repo, mock_chunking_service, mock_embedding_service):
+    async def test_process_chunking_background_batch_mode(
+        self,
+        doc_manager,
+        mock_page_repo,
+        mock_chunk_repo,
+        mock_chunking_service,
+        mock_embedding_service,
+    ):
         """Test background chunking processing in batch mode."""
         # Setup mocks
         mock_page_repo.get_combined_content.return_value = "Long combined content for chunking"
         mock_chunk_repo.create_batch.return_value = [1, 2, 3]
+        mock_chunk_repo.get_max_chunk_index.return_value = 0
 
         # Execute background task
+        group_id = uuid4()
         await doc_manager._process_chunking_background(
-            document_id=1,
-            page_ids=[1, 2],
-            chunk_size=1000,
-            batch_enabled=True
+            document_id=1, page_ids=[1, 2], group_id=group_id, chunk_size=1000, batch_enabled=True
         )
 
         # Verify
-        mock_chunking_service.smart_chunk_markdown.assert_called_once_with("Long combined content for chunking", chunk_size=1000)
-        mock_embedding_service.get_embeddings_batch.assert_called_once_with(["Chunk 1", "Chunk 2", "Chunk 3"])
+        mock_chunking_service.smart_chunk_markdown.assert_called_once_with(
+            "Long combined content for chunking", chunk_size=1000
+        )
+        mock_embedding_service.get_embeddings_batch.assert_called_once_with(
+            ["Chunk 1", "Chunk 2", "Chunk 3"]
+        )
         mock_chunk_repo.create_batch.assert_called_once()
         mock_page_repo.update_status_bulk.assert_called_with([1, 2], "chunked")
 
     @pytest.mark.asyncio
-    async def test_process_chunking_background_single_mode(self, doc_manager, mock_page_repo, mock_chunk_repo, mock_chunking_service, mock_embedding_service):
+    async def test_process_chunking_background_single_mode(
+        self,
+        doc_manager,
+        mock_page_repo,
+        mock_chunk_repo,
+        mock_chunking_service,
+        mock_embedding_service,
+    ):
         """Test background chunking processing in single mode."""
         # Setup mocks
         mock_page_repo.get_combined_content.return_value = "Content for chunking"
+        mock_chunk_repo.get_max_chunk_index.return_value = 0
 
         # Execute background task
+        group_id = uuid4()
         await doc_manager._process_chunking_background(
-            document_id=1,
-            page_ids=[1],
-            chunk_size=1000,
-            batch_enabled=False
+            document_id=1, page_ids=[1], group_id=group_id, chunk_size=1000, batch_enabled=False
         )
 
         # Verify
@@ -343,38 +390,47 @@ class TestDocManager:
         mock_page_repo.update_status_bulk.assert_called_with([1], "chunked")
 
     @pytest.mark.asyncio
-    async def test_process_chunking_background_with_errors(self, doc_manager, mock_page_repo, mock_chunking_service, mock_embedding_service):
+    async def test_process_chunking_background_with_errors(
+        self,
+        doc_manager,
+        mock_page_repo,
+        mock_chunking_service,
+        mock_embedding_service,
+        mock_chunk_repo,
+    ):
         """Test background chunking processing with errors."""
         # Setup mocks
         mock_page_repo.get_combined_content.return_value = "Content"
+        mock_chunk_repo.get_max_chunk_index.return_value = 0
         mock_embedding_service.get_embeddings_batch.side_effect = Exception("Embedding error")
 
         # Execute background task
+        group_id = uuid4()
         await doc_manager._process_chunking_background(
-            document_id=1,
-            page_ids=[1],
-            chunk_size=1000,
-            batch_enabled=True
+            document_id=1, page_ids=[1], group_id=group_id, chunk_size=1000, batch_enabled=True
         )
 
         # Verify error handling
-        mock_page_repo.update_status_bulk.assert_called_with([1], "pending")  # Reset to pending on error
+        mock_page_repo.update_status_bulk.assert_called_with(
+            [1], "pending"
+        )  # Reset to pending on error
 
     @pytest.mark.asyncio
-    async def test_process_chunking_custom_chunk_size(self, doc_manager, mock_page_repo, mock_config):
+    async def test_process_chunking_custom_chunk_size(
+        self, doc_manager, mock_page_repo, mock_config
+    ):
         """Test chunking processing with custom chunk size."""
         # Setup mocks
         mock_page_repo.validate_pages_for_chunking.return_value = (True, "", 2000)
 
         # Execute
         result = await doc_manager.process_chunking(
-            document_id=1,
-            page_ids=[1],
-            chunk_size=500,  # Custom size
-            batch_enabled=True
+            document_id=1, page_ids=[1], chunk_size=500, batch_enabled=True  # Custom size
         )
 
         # Verify
         assert result.pages_processed == 1
         # Should use custom chunk size, not config default
-        mock_page_repo.validate_pages_for_chunking.assert_called_once_with([1], min_size=100, max_size=50000)
+        mock_page_repo.validate_pages_for_chunking.assert_called_once_with(
+            [1], min_size=100, max_size=50000
+        )

@@ -317,6 +317,25 @@ class ContextBridge:
             doc_repo = DocumentRepository(self._db_manager)
             return await doc_repo.list_all(limit=limit, offset=offset)
 
+    async def get_document(self, name: str, version: str) -> Optional[Document]:
+        """
+        Get a specific document by name and version.
+
+        Args:
+            name: Document name
+            version: Document version
+
+        Returns:
+            Document object or None if not found
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+        async with self._db_manager.connection() as conn:
+            doc_repo = DocumentRepository(conn)
+            return await doc_repo.get_by_name_version(name, version)
+
     async def delete_document(self, document_id: int) -> bool:
         """
         Delete a document and all related data (pages, chunks).
@@ -575,6 +594,28 @@ class ContextBridge:
             limit=limit,
             vector_weight=vector_weight,
             bm25_weight=bm25_weight,
+        )
+
+    async def search_across_versions(
+        self, query: str, document_name: str, limit_per_version: int = 5
+    ) -> Dict[str, List[ContentSearchResult]]:
+        """
+        Search across all versions of a document.
+
+        Args:
+            query: Search query
+            document_name: Name of the document to search across versions
+            limit_per_version: Maximum results per version
+
+        Returns:
+            Dictionary mapping version strings to lists of ContentSearchResult
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+        return await self._search_service.search_across_versions(
+            query=query, document_name=document_name, limit_per_version=limit_per_version
         )
 
     # Utility Methods

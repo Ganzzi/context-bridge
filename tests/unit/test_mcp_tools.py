@@ -54,7 +54,12 @@ class TestMCPTools:
             created_at=MagicMock(),
         )
         mock_result = ContentSearchResult(
-            chunk=mock_chunk, document_name="test_doc", document_version="1.0.0", score=0.85, rank=1
+            chunk=mock_chunk,
+            document_name="test_doc",
+            document_version="1.0.0",
+            document_source_url="https://example.com",
+            score=0.85,
+            rank=1,
         )
         bridge.search = AsyncMock(return_value=[mock_result])
 
@@ -73,7 +78,7 @@ class TestMCPTools:
             mock_server.request_context = mock_server_context
 
             # Test basic call
-            result = await _handle_find_documents(mock_bridge, {"limit": 10})
+            result = await _handle_find_documents(mock_bridge, {"query": "test", "limit": 10})
 
             assert len(result) == 1
             content = result[0]
@@ -98,7 +103,7 @@ class TestMCPTools:
             mock_server.request_context = mock_server_context
 
             result = await _handle_find_documents(
-                mock_bridge, {"name": "test_doc", "version": "1.0.0", "limit": 5}
+                mock_bridge, {"query": "test", "name": "test_doc", "version": "1.0.0", "limit": 5}
             )
 
             assert len(result) == 1
@@ -226,11 +231,11 @@ class TestMCPTools:
         with patch("context_bridge_mcp.server.server") as mock_server:
             mock_server.request_context = mock_server_context
 
-            result = await handle_call_tool("find_documents", {"limit": 10})
+            result = await handle_call_tool("find_documents", {"query": "test", "limit": 10})
 
             assert len(result) == 1
             # Should have called our handler
-            mock_bridge.find_documents.assert_called_once_with(name=None, version=None, limit=10)
+            mock_bridge.find_documents.assert_called_once_with(query="test", limit=10)
 
     @pytest.mark.asyncio
     async def test_call_tool_search_content(self, mock_bridge, mock_server_context):
