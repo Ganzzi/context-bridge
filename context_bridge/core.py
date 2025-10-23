@@ -41,41 +41,59 @@ class ContextBridge:
     - Searching documentation content
     - Managing documents
 
-    Example:
-        ```python
-        from context_bridge import ContextBridge
+    Configuration supports three patterns:
 
-        # Initialize
-        bridge = ContextBridge()
-        await bridge.initialize()
+    **Pattern 1: Direct Python (Recommended for PyPI users)**
+    ```python
+    from context_bridge import ContextBridge, Config
 
-        # Crawl documentation with additional URLs
+    config = Config(
+        postgres_host="localhost",
+        postgres_password="secure_pass",
+        embedding_model="nomic-embed-text:latest"
+    )
+
+    async with ContextBridge(config=config) as bridge:
         result = await bridge.crawl_documentation(
             name="psqlpy",
             version="0.9.0",
-            source_url="https://psqlpy.readthedocs.io",
-            additional_urls=[
-                "https://psqlpy.readthedocs.io/api/",
-                "https://psqlpy.readthedocs.io/examples/"
-            ]
+            source_url="https://psqlpy.readthedocs.io"
         )
-
-        # List pages
         pages = await bridge.list_pages(result.document_id)
-
-        # Process chunking
-        page_ids = [p.id for p in pages[:10]]
-        chunk_result = await bridge.process_pages(result.document_id, page_ids)
-
-        # Search
+        chunk_result = await bridge.process_pages(result.document_id, [p.id for p in pages[:10]])
         results = await bridge.search(
             query="connection pooling",
             document_id=result.document_id
         )
+    ```
 
-        # Cleanup
-        await bridge.close()
-        ```
+    **Pattern 2: Environment Variables (Recommended for Docker/K8s)**
+    ```bash
+    export POSTGRES_HOST=localhost
+    export POSTGRES_PASSWORD=secure_pass
+    export EMBEDDING_MODEL=nomic-embed-text:latest
+    ```
+    ```python
+    from context_bridge import ContextBridge
+
+    async with ContextBridge() as bridge:
+        result = await bridge.crawl_documentation(...)
+    ```
+
+    **Pattern 3: .env File (Convenient for local development)**
+    ```bash
+    # .env (git-ignored)
+    POSTGRES_HOST=localhost
+    POSTGRES_PASSWORD=devpass
+    EMBEDDING_MODEL=nomic-embed-text:latest
+    ```
+    ```python
+    # Automatically loaded if python-dotenv is available
+    from context_bridge import ContextBridge
+
+    async with ContextBridge() as bridge:
+        result = await bridge.crawl_documentation(...)
+    ```
 
     Context Manager Support:
         ```python
@@ -90,7 +108,18 @@ class ContextBridge:
         Initialize ContextBridge.
 
         Args:
-            config: Optional configuration. If not provided, loads from environment.
+            config: Optional Config object. If not provided, creates a new Config
+                   that loads from environment variables and .env file (if available).
+
+        Example:
+            ```python
+            # With explicit config
+            config = Config(postgres_host="localhost", ...)
+            bridge = ContextBridge(config=config)
+
+            # With environment variables / .env
+            bridge = ContextBridge()
+            ```
         """
         self.config = config or Config()
         self._db_manager: Optional[PostgreSQLManager] = None
@@ -207,27 +236,86 @@ class ContextBridge:
 
     async def find_documents(
         self,
-        query: str,
+        query: Optional[str] = None,
         limit: int = 10,
+        offset: int = 0,
+        name: Optional[str] = None,
+        version: Optional[str] = None,
+        id: Optional[int] = None,
     ) -> List[Document]:
         """
-        Find documents by query.
-        Searches document name, description, and metadata.
-        Returns documents sorted by relevance.
+        Find documents by query or filters, or list all documents.
+        If query is provided, searches document name, description, and metadata.
+        If name/version/id filters are provided, filters by those fields.
+        If no filters, returns all documents with pagination.
+        Returns documents sorted by relevance (for search) or creation date.
 
         Args:
-            query: Search query string
+            query: Optional search query string
             limit: Maximum number of results to return
+            offset: Pagination offset
+            name: Optional name filter (exact match)
+            version: Optional version filter (exact match)
+            id: Optional ID filter (exact match)
 
         Returns:
-            List of Document objects sorted by relevance score
+            List of Document objects
 
         Raises:
             RuntimeError: If ContextBridge not initialized
         """
         self._check_initialized()
-        search_results = await self._search_service.find_documents(query=query, limit=limit)
-        return [result.document for result in search_results]
+        if query is not None:
+            search_results = await self._search_service.find_documents(query=query, limit=limit)
+            return [result.document for result in search_results]
+        else:
+            # Use repository for filtering/listing
+            async with self._db_manager.connection() as conn:
+                doc_repo = DocumentRepository(self._db_manager)
+                if id is not None:
+                    doc = await doc_repo.get_by_id(id)
+                    return [doc] if doc else []
+                elif name is not None or version is not None:
+                    # For now, implement simple filtering - could be enhanced
+                    all_docs = await doc_repo.list_all(
+                        limit=1000, offset=0
+                    )  # Get all for filtering
+                    filtered = []
+                    for doc in all_docs:
+                        if name and doc.name != name:
+                            continue
+                        if version and doc.version != version:
+                            continue
+                        filtered.append(doc)
+                    # Apply pagination
+                    start = offset
+                    end = offset + limit
+                    return filtered[start:end]
+                else:
+                    return await doc_repo.list_all(limit=limit, offset=offset)
+
+    async def list_documents(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Document]:
+        """
+        List all documents with pagination.
+
+        Args:
+            limit: Maximum number of results to return
+            offset: Pagination offset
+
+        Returns:
+            List of Document objects ordered by creation date (newest first)
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+        async with self._db_manager.connection() as conn:
+            doc_repo = DocumentRepository(self._db_manager)
+            return await doc_repo.list_all(limit=limit, offset=offset)
 
     async def delete_document(self, document_id: int) -> bool:
         """

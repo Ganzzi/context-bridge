@@ -207,38 +207,7 @@ pip install -e .
 
 ## 🚀 Quick Start
 
-### 1. Setup Environment
-
-Create a `.env` file:
-
-```bash
-# PostgreSQL Configuration
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your_secure_password
-POSTGRES_DB=context_bridge
-
-# Embedding Provider (ollama or gemini)
-EMBEDDING_PROVIDER=ollama
-
-# Ollama Configuration (if using ollama)
-OLLAMA_BASE_URL=http://localhost:11434
-EMBEDDING_MODEL=nomic-embed-text
-VECTOR_DIMENSION=768
-
-# Gemini Configuration (if using gemini)
-# GOOGLE_API_KEY=your_google_api_key
-# GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-# GEMINI_OUTPUT_DIMENSIONALITY=768
-
-# Search Configuration
-SIMILARITY_THRESHOLD=0.7
-BM25_WEIGHT=0.3
-VECTOR_WEIGHT=0.7
-```
-
-### 2. Initialize Database
+### 1. Initialize Database
 
 ```bash
 python -m context_bridge.database.init_databases
@@ -249,75 +218,176 @@ This will:
 - Create all necessary tables
 - Set up vector and BM25 indexes
 
-### 3. Basic Usage
+### 2. Basic Usage (Three Ways)
+
+#### **Option A: Direct Python (Recommended for PyPI users)**
 
 ```python
 import asyncio
-from context_bridge.config import get_config
-from context_bridge.database.postgres_manager import PostgreSQLManager
-from context_bridge.service.crawling_service import CrawlingService, CrawlConfig
-from crawl4ai import AsyncWebCrawler
+from context_bridge import ContextBridge, Config
 
 async def main():
-    # Initialize
-    config = get_config()
-    db_manager = PostgreSQLManager(config)
-    await db_manager.initialize()
+    # Create config with your settings
+    config = Config(
+        postgres_host="localhost",
+        postgres_password="your_secure_password",
+        embedding_model="nomic-embed-text:latest"
+    )
     
-    # Crawl documentation
-    crawl_service = CrawlingService(CrawlConfig(max_depth=3))
-    
-    async with AsyncWebCrawler(verbose=True) as crawler:
-        result = await crawl_service.crawl_webpage(
-            crawler,
-            "https://docs.python.org/3/library/"
+    # Use with context manager
+    async with ContextBridge(config=config) as bridge:
+        # Crawl documentation
+        result = await bridge.crawl_documentation(
+            name="Python Docs",
+            version="3.11",
+            source_url="https://docs.python.org/3/library/"
         )
-    
-    print(f"Crawled {result.successful_count} pages")
-    
-    # Store in database (using repositories)
-    # ... (see full examples below)
-    
-    await db_manager.close()
+        
+        # Search documentation
+        search_results = await bridge.search(
+            query="async await tutorial",
+            document_id=result.document_id
+        )
+        
+        for hit in search_results[:3]:
+            print(f"Score: {hit.score}, Content: {hit.content[:100]}...")
 
 if __name__ == "__main__":
     asyncio.run(main())
+```
+
+#### **Option B: Environment Variables (Recommended for Docker/K8s)**
+
+```bash
+# Set environment variables
+export POSTGRES_HOST=postgres
+export POSTGRES_PASSWORD=secure_password
+export OLLAMA_BASE_URL=http://ollama:11434
+export EMBEDDING_MODEL=nomic-embed-text:latest
+
+# Or in docker-compose.yml
+environment:
+  - POSTGRES_HOST=postgres
+  - POSTGRES_PASSWORD=secure_password
+  - EMBEDDING_MODEL=nomic-embed-text:latest
+```
+
+```python
+import asyncio
+from context_bridge import ContextBridge
+
+async def main():
+    # Config automatically loaded from environment variables
+    async with ContextBridge() as bridge:
+        result = await bridge.crawl_documentation(
+            name="Python Docs",
+            version="3.11",
+            source_url="https://docs.python.org/3/library/"
+        )
+```
+
+#### **Option C: .env File (Convenient for local development)**
+
+Create `.env` file (git-ignored):
+
+```bash
+# PostgreSQL Configuration
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_DB=context_bridge
+
+# Ollama Configuration
+OLLAMA_BASE_URL=http://localhost:11434
+EMBEDDING_MODEL=nomic-embed-text:latest
+VECTOR_DIMENSION=768
+
+# Search Configuration
+SIMILARITY_THRESHOLD=0.7
+BM25_WEIGHT=0.3
+VECTOR_WEIGHT=0.7
+
+# Chunking Configuration
+CHUNK_SIZE=2000
+MIN_COMBINED_CONTENT_SIZE=100
+MAX_COMBINED_CONTENT_SIZE=3500000
+
+# Crawling Configuration
+CRAWL_MAX_DEPTH=3
+CRAWL_MAX_CONCURRENT=5
+```
+
+Then in your code:
+
+```python
+import asyncio
+from context_bridge import ContextBridge
+
+async def main():
+    # Config automatically loaded from .env file (if python-dotenv is available)
+    async with ContextBridge() as bridge:
+        result = await bridge.crawl_documentation(...)
+```
+
+To use .env files in development, install with dev dependencies:
+```bash
+pip install context-bridge[dev]
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-The package uses Pydantic for type-safe configuration. All settings can be configured via environment variables or `.env` file.
+The package uses Pydantic for type-safe, type-hinted configuration. Context Bridge supports three configuration methods:
+
+### Configuration Methods (Priority Order)
+
+1. **Direct Python instantiation** (recommended for packaged installs)
+2. **Environment variables** (recommended for containers/CI)
+3. **.env file** (convenient for local development only)
 
 ### Core Settings
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_USER` | `postgres` | PostgreSQL user |
-| `POSTGRES_PASSWORD` | *(required)* | PostgreSQL password (min 8 chars) |
-| `POSTGRES_DB` | `context_bridge` | Database name |
+| Setting | Default | Description | Python API |
+|---------|---------|-------------|-----------|
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host | `postgres_host` |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port | `postgres_port` |
+| `POSTGRES_USER` | `postgres` | PostgreSQL user | `postgres_user` |
+| `POSTGRES_PASSWORD` | `` (empty) | PostgreSQL password (min 8 chars for prod) | `postgres_password` |
+| `POSTGRES_DB` | `context_bridge` | Database name | `postgres_db` |
+| `DB_POOL_MAX` | `10` | Connection pool size | `postgres_max_pool_size` |
 
 ### Embedding Settings
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `EMBEDDING_PROVIDER` | `ollama` | Embedding provider (`ollama` or `gemini`) |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
-| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name |
-| `VECTOR_DIMENSION` | `768` | Embedding vector dimension |
-| `GOOGLE_API_KEY` | - | Google API key (for Gemini) |
-| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Gemini model name |
+| Setting | Default | Description | Python API |
+|---------|---------|-------------|-----------|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL | `ollama_base_url` |
+| `EMBEDDING_MODEL` | `nomic-embed-text:latest` | Ollama model name | `embedding_model` |
+| `VECTOR_DIMENSION` | `768` | Embedding vector dimension | `vector_dimension` |
 
 ### Search Settings
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `SIMILARITY_THRESHOLD` | `0.7` | Minimum similarity score |
-| `BM25_WEIGHT` | `0.3` | BM25 weight in hybrid search |
-| `VECTOR_WEIGHT` | `0.7` | Vector weight in hybrid search |
+| Setting | Default | Description | Python API |
+|---------|---------|-------------|-----------|
+| `SIMILARITY_THRESHOLD` | `0.7` | Minimum similarity score | `similarity_threshold` |
+| `BM25_WEIGHT` | `0.3` | BM25 weight in hybrid search | `bm25_weight` |
+| `VECTOR_WEIGHT` | `0.7` | Vector weight in hybrid search | `vector_weight` |
+
+### Chunking Settings
+
+| Setting | Default | Description | Python API |
+|---------|---------|-------------|-----------|
+| `CHUNK_SIZE` | `2000` | Default chunk size (bytes) | `chunk_size` |
+| `MIN_COMBINED_CONTENT_SIZE` | `100` | Minimum combined page size (bytes) | `min_combined_content_size` |
+| `MAX_COMBINED_CONTENT_SIZE` | `3500000` | Maximum combined page size (bytes) | `max_combined_content_size` |
+
+### Crawling Settings
+
+| Setting | Default | Description | Python API |
+|---------|---------|-------------|-----------|
+| `CRAWL_MAX_DEPTH` | `3` | Maximum crawl depth | `crawl_max_depth` |
+| `CRAWL_MAX_CONCURRENT` | `10` | Maximum concurrent crawl operations | `crawl_max_concurrent` |
 
 ---
 

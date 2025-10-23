@@ -32,7 +32,7 @@ with st.form("search_form"):
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            documents = loop.run_until_complete(bridge.find_documents(limit=100))
+            documents = loop.run_until_complete(bridge.list_documents(limit=100))
             doc_options = ["All Documents"] + [
                 f"{doc.name} v{doc.version} (ID: {doc.id})" for doc in documents
             ]
