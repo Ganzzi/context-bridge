@@ -1,6 +1,6 @@
 """Context Bridge - Unified Python package for RAG documentation workflows."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 from .config import Config, get_config, set_config
 from .core import ContextBridge
