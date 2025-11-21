@@ -39,15 +39,13 @@ async with ContextBridge() as bridge:
     domain_tags = await bridge.list_tags(category=TagCategory.DOMAIN)
 ```
 
-### 2. Adding Tags to Documents
+### 2. Viewing Document Tags
 
 ```python
-# Add a single tag
-await bridge.add_tag_to_document(document_id=1, tag_id=2)
-
-# Add multiple tags
-tag_ids = [2, 5, 10]  # API Reference, Python, Backend
-await bridge.add_tags_to_document(document_id=1, tag_ids=tag_ids)
+# Get all tags for a document
+tags = await bridge.get_document_tags(document_id=1)
+for tag in tags:
+    print(f"{tag.name} ({tag.category}): {tag.description}")
 ```
 
 ### 3. Searching with Tags
@@ -62,19 +60,30 @@ tag_ids = [2, 5, 10]
 documents = await bridge.find_documents(tags=tag_ids)
 ```
 
-### 4. Managing Document Tags
+### 4. Managing Document Tags (Streamlit UI)
 
+Tag management (adding/removing tags) is done through the **Streamlit UI** or by calling the **TagRepository directly**:
+
+**Via Streamlit UI:**
+- Open the Tags Management page (`pages/tags.py`)
+- Navigate to Document Management
+- Use the tag selector to add/remove tags
+
+**Via TagRepository (Advanced Users):**
 ```python
-# Get all tags for a document
-tags = await bridge.get_document_tags(document_id=1)
-for tag in tags:
-    print(f"{tag.name} ({tag.category}): {tag.description}")
+from context_bridge.database.repositories.tag_repository import TagRepository
 
-# Remove a tag
-await bridge.remove_tag_from_document(document_id=1, tag_id=2)
-
-# Remove all tags
-await bridge.remove_all_tags_from_document(document_id=1)
+async with bridge._db_manager.connection() as conn:
+    tag_repo = TagRepository(conn)
+    
+    # Add tags
+    await tag_repo.add_tags_to_document(document_id=1, tag_ids=[2, 5, 10])
+    
+    # Remove a tag
+    await tag_repo.remove_tag_from_document(document_id=1, tag_id=2)
+    
+    # Remove all tags
+    await tag_repo.remove_all_tags_from_document(document_id=1)
 ```
 
 ---
@@ -159,7 +168,7 @@ CREATE TABLE document_tags (
 
 ### Repository Layer
 
-TagRepository provides:
+TagRepository (direct database access) provides:
 
 ```python
 # CRUD Operations
@@ -171,7 +180,7 @@ list_all_tags() -> List[Tag]
 update_tag(tag_id: int, update: TagUpdate) -> Optional[Tag]
 delete_tag(tag_id: int) -> bool
 
-# Document-Tag Associations
+# Document-Tag Associations (Repository Direct Access)
 add_tag_to_document(document_id: int, tag_id: int) -> bool
 add_tags_to_document(document_id: int, tag_ids: List[int]) -> int
 remove_tag_from_document(document_id: int, tag_id: int) -> bool
@@ -186,40 +195,29 @@ get_tag_statistics_by_category(category: TagCategory) -> List[TagStatistics]
 count_tags_by_category() -> Dict[str, int]
 ```
 
+**Note:** ContextBridge Core API provides `list_tags()` and `get_document_tags()` for viewing. Tag management operations (add/remove) should be done through the Streamlit UI or by accessing TagRepository directly.
+
 ---
 
 ## Common Use Cases
 
-### Use Case 1: Tag a Python API Documentation
+### Use Case 1: Finding API Documentation
 
 ```python
-# Find relevant tags
-python_tag = await bridge.get_tag_by_name("python")
+# Find documents with API Reference tag
 api_tag = await bridge.get_tag_by_name("api-reference")
-backend_tag = await bridge.get_tag_by_name("backend")
+docs = await bridge.find_documents(tags=[api_tag.id])
 
-# Add tags to document
-await bridge.add_tags_to_document(
-    document_id=doc_id,
-    tag_ids=[python_tag.id, api_tag.id, backend_tag.id]
-)
+# Get all tags for a specific document
+tags = await bridge.get_document_tags(doc_id)
 ```
 
 ### Use Case 2: Find All Security Documentation
 
 ```python
-# Get security tag
-security_tag = await bridge.get_tag_by_name("security")
-
-# Find all documents with security tag
-doc_ids = await bridge.get_documents_by_tag(security_tag.id)
-
-# Retrieve full documents
-docs = []
-for doc_id in doc_ids:
-    doc = await bridge.get_document_by_id(doc_id)
-    if doc:
-        docs.append(doc)
+# Use find_documents with tag filtering
+# Security documentation is identified by filtering with security tag
+docs = await bridge.find_documents(tags=[security_tag.id])
 ```
 
 ### Use Case 3: Multi-Tag Filtering
@@ -319,26 +317,6 @@ List all available tags with optional filtering.
 }
 ```
 
-#### `add_document_tags`
-Add tags to a document.
-
-**Input:**
-```json
-{
-  "document_id": 1,
-  "tag_ids": [1, 5, 10]
-}
-```
-
-**Output:**
-```json
-{
-  "success": true,
-  "tags_added": 3,
-  "document_id": 1
-}
-```
-
 #### Updated: `find_documents`
 Find documents with tag filtering.
 
@@ -350,6 +328,8 @@ Find documents with tag filtering.
   "limit": 10
 }
 ```
+
+**Note:** Tag management (add/remove) is not available through MCP. Use the Streamlit UI or direct repository access instead.
 
 ---
 

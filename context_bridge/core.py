@@ -690,41 +690,6 @@ class ContextBridge:
         self._check_initialized()
         return await self._tag_repository.list_tags(category=category)
 
-    async def add_tags_to_document(self, document_id: int, tag_ids: List[int]) -> int:
-        """
-        Add one or more tags to a document.
-
-        Args:
-            document_id: Document ID
-            tag_ids: List of tag IDs to add
-
-        Returns:
-            Number of tags successfully added
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-            ValueError: If document_id is invalid
-        """
-        self._check_initialized()
-        return await self._tag_repository.add_tags_to_document(document_id, tag_ids)
-
-    async def remove_tag_from_document(self, document_id: int, tag_id: int) -> bool:
-        """
-        Remove a tag from a document.
-
-        Args:
-            document_id: Document ID
-            tag_id: Tag ID to remove
-
-        Returns:
-            True if successful, False otherwise
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        return await self._tag_repository.remove_tag_from_document(document_id, tag_id)
-
     async def get_document_tags(self, document_id: int) -> List[Tag]:
         """
         Get all tags for a document.
@@ -740,56 +705,6 @@ class ContextBridge:
         """
         self._check_initialized()
         return await self._tag_repository.get_document_tags(document_id)
-
-    async def remove_all_tags_from_document(self, document_id: int) -> int:
-        """
-        Remove all tags from a document.
-
-        Args:
-            document_id: Document ID
-
-        Returns:
-            Number of tags removed
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        return await self._tag_repository.remove_all_tags_from_document(document_id)
-
-    async def get_documents_by_tag(
-        self, tag_id: int, limit: int = 100, offset: int = 0
-    ) -> List[Document]:
-        """
-        Get all documents with a specific tag.
-
-        Args:
-            tag_id: Tag ID to filter by
-            limit: Maximum results to return
-            offset: Pagination offset
-
-        Returns:
-            List of Document objects with the tag
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        document_ids = await self._tag_repository.get_documents_by_tag(
-            tag_id=tag_id, limit=limit, offset=offset
-        )
-
-        # Fetch full document objects
-        async with self._db_manager.connection() as conn:
-            doc_repo = DocumentRepository(self._db_manager)
-            documents = []
-            for doc_id in document_ids:
-                doc = await doc_repo.get_by_id(doc_id)
-                if doc:
-                    doc_tags = await self._tag_repository.get_document_tags(doc_id)
-                    doc.tags = [t.id for t in doc_tags]
-                    documents.append(doc)
-            return documents
 
     # Group Management Operations
 

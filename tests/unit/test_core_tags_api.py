@@ -112,32 +112,6 @@ async def test_list_tags_by_category(mock_bridge):
 
 
 @pytest.mark.asyncio
-async def test_add_tags_to_document(mock_bridge):
-    """Test adding tags to a document."""
-    mock_bridge._tag_repository.add_tags_to_document.return_value = 3
-
-    # Execute
-    result = await mock_bridge.add_tags_to_document(document_id=1, tag_ids=[2, 5, 10])
-
-    # Verify
-    assert result == 3
-    mock_bridge._tag_repository.add_tags_to_document.assert_called_once_with(1, [2, 5, 10])
-
-
-@pytest.mark.asyncio
-async def test_remove_tag_from_document(mock_bridge):
-    """Test removing a tag from a document."""
-    mock_bridge._tag_repository.remove_tag_from_document.return_value = True
-
-    # Execute
-    result = await mock_bridge.remove_tag_from_document(document_id=1, tag_id=2)
-
-    # Verify
-    assert result is True
-    mock_bridge._tag_repository.remove_tag_from_document.assert_called_once_with(1, 2)
-
-
-@pytest.mark.asyncio
 async def test_get_document_tags(mock_bridge):
     """Test retrieving tags for a document."""
     now = datetime.now(timezone.utc)
@@ -168,19 +142,6 @@ async def test_get_document_tags(mock_bridge):
 
 
 @pytest.mark.asyncio
-async def test_remove_all_tags_from_document(mock_bridge):
-    """Test removing all tags from a document."""
-    mock_bridge._tag_repository.remove_all_tags_from_document.return_value = 5
-
-    # Execute
-    result = await mock_bridge.remove_all_tags_from_document(document_id=1)
-
-    # Verify
-    assert result == 5
-    mock_bridge._tag_repository.remove_all_tags_from_document.assert_called_once_with(1)
-
-
-@pytest.mark.asyncio
 async def test_core_api_not_initialized_raises_error(mock_bridge):
     """Test that calling tag methods without initialization raises error."""
     mock_bridge._initialized = False
@@ -188,9 +149,6 @@ async def test_core_api_not_initialized_raises_error(mock_bridge):
     # Execute and verify
     with pytest.raises(RuntimeError, match="ContextBridge not initialized"):
         await mock_bridge.list_tags()
-
-    with pytest.raises(RuntimeError, match="ContextBridge not initialized"):
-        await mock_bridge.add_tags_to_document(1, [2])
 
     with pytest.raises(RuntimeError, match="ContextBridge not initialized"):
         await mock_bridge.get_document_tags(1)
