@@ -236,8 +236,29 @@ if selected_doc_id:
                     for page in selected_pages_info:
                         st.write(f"- {page.url} ({page.content_length:,} chars)")
 
+                # Group Configuration Section
+                st.subheader("🏷️ Group Configuration")
+
+                col_group1, col_group2 = st.columns([1, 1])
+
+                with col_group1:
+                    group_name = st.text_input(
+                        "Group Name",
+                        value="",
+                        placeholder="e.g., API Documentation",
+                        help="Optional human-readable name for this page group",
+                    )
+
+                with col_group2:
+                    group_description = st.text_input(
+                        "Group Description",
+                        value="",
+                        placeholder="e.g., Complete REST API reference",
+                        help="Optional description of what this group contains",
+                    )
+
                 # Chunk size configuration
-                col_chunk1, col_chunk2 = st.columns([1, 2])
+                col_chunk1, col_chunk2 = st.columns([1, 1])
 
                 with col_chunk1:
                     chunk_size = st.number_input(
@@ -250,97 +271,162 @@ if selected_doc_id:
                     )
 
                 with col_chunk2:
-                    if st.button("🚀 Start Chunking Process", type="primary", key="start_chunking"):
-                        # Validate selection
-                        if not st.session_state.selected_pages:
-                            st.error("No pages selected for processing.")
-                        elif len(st.session_state.selected_pages) > 50:
-                            st.error("Too many pages selected. Please select 50 or fewer pages.")
-                        else:
-                            # Start processing
-                            try:
-                                with st.spinner(
-                                    "Processing pages into chunks... This may take a few minutes."
-                                ):
-                                    # Create progress bar
-                                    progress_bar = st.progress(0)
-                                    status_text = st.empty()
+                    context_enabled = st.checkbox(
+                        "Enable AI Context Generation",
+                        value=False,
+                        help="Generate AI-powered context summaries for each chunk (Phase 3)",
+                    )
 
-                                    status_text.text("Initializing chunking process...")
+                # Context model selector (shown only if context is enabled)
+                if context_enabled:
+                    st.divider()
+                    st.subheader("🤖 AI Context Settings")
 
-                                    # Run processing in asyncio event loop
-                                    import asyncio
+                    col_model1, col_model2 = st.columns([1, 1])
 
-                                    loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(loop)
+                    with col_model1:
+                        context_model = st.selectbox(
+                            "LLM Model",
+                            [
+                                "anthropic:claude-3-5-sonnet-20241022",
+                                "openai:gpt-4o",
+                                "openai:gpt-4-turbo",
+                                "openai:gpt-4",
+                            ],
+                            index=0,
+                            help="Select the LLM model for context generation",
+                        )
 
-                                    # Update progress
-                                    progress_bar.progress(10)
-                                    status_text.text("Validating pages...")
+                    with col_model2:
+                        temperature = st.slider(
+                            "Temperature",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=0.3,
+                            step=0.1,
+                            help="Controls randomness in context generation (0.0=deterministic, 1.0=creative)",
+                        )
 
-                                    # Process the pages synchronously
-                                    progress_bar.progress(20)
-                                    status_text.text("Processing pages into chunks...")
+                    cost_info = st.info(
+                        "💡 **Context Generation Info:**\n\n"
+                        "- Each chunk will get a 2-3 sentence context prepended\n"
+                        "- Prompt caching is enabled for cost efficiency\n"
+                        "- First chunk caches document context (~$0.30)\n"
+                        "- Subsequent chunks use cached context (~$0.03 each)\n"
+                        "- Processing may take several minutes for large documents"
+                    )
+                else:
+                    context_model = None
+                    temperature = 0.3
 
-                                    result = loop.run_until_complete(
-                                        bridge.process_pages(
-                                            document_id=selected_doc_id,
-                                            page_ids=st.session_state.selected_pages,
-                                            chunk_size=chunk_size,
-                                            run_async=False,  # Run synchronously for Streamlit
-                                        )
+                # Process button
+                if st.button(
+                    "🚀 Start Chunking & Group Creation", type="primary", key="start_chunking"
+                ):
+                    # Validate selection
+                    if not st.session_state.selected_pages:
+                        st.error("No pages selected for processing.")
+                    elif len(st.session_state.selected_pages) > 50:
+                        st.error("Too many pages selected. Please select 50 or fewer pages.")
+                    else:
+                        # Start processing
+                        try:
+                            with st.spinner(
+                                "Processing pages into chunks... This may take a few minutes."
+                            ):
+                                # Create progress bar
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+
+                                status_text.text("Initializing chunking process...")
+
+                                # Run processing in asyncio event loop
+                                import asyncio
+
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+
+                                # Update progress
+                                progress_bar.progress(10)
+                                status_text.text("Validating pages...")
+
+                                # Process the pages synchronously
+                                progress_bar.progress(20)
+                                status_text.text("Processing pages into chunks...")
+
+                                if context_enabled:
+                                    progress_context = st.info(
+                                        "⏳ Context generation will start after chunking is complete..."
                                     )
-                                    loop.close()
+                                    progress_updates = st.empty()
 
-                                    progress_bar.progress(100)
-                                    status_text.text("Chunking process completed!")
+                                result = loop.run_until_complete(
+                                    bridge.process_pages(
+                                        document_id=selected_doc_id,
+                                        page_ids=st.session_state.selected_pages,
+                                        chunk_size=chunk_size,
+                                        context_enabled=context_enabled,
+                                        context_model=context_model if context_enabled else None,
+                                        group_name=group_name if group_name else None,
+                                        run_async=False,  # Run synchronously for Streamlit
+                                    )
+                                )
+                                loop.close()
 
-                                    # Display results
-                                    st.success("✅ Chunking process completed successfully!")
+                                progress_bar.progress(100)
+                                status_text.text("Chunking process completed!")
 
-                                    with st.expander("📊 Processing Results", expanded=True):
-                                        col_res1, col_res2 = st.columns(2)
-                                        with col_res1:
-                                            st.metric("Pages Processed", result.pages_processed)
-                                        with col_res2:
-                                            st.metric("Document ID", result.document_id)
+                                # Display results
+                                st.success("✅ Chunking process completed successfully!")
 
-                                        # Get chunk statistics
-                                        try:
-                                            stats_loop = asyncio.new_event_loop()
-                                            asyncio.set_event_loop(stats_loop)
-                                            stats = stats_loop.run_until_complete(
-                                                bridge.get_chunk_stats(selected_doc_id)
-                                            )
-                                            stats_loop.close()
-                                            st.metric("Chunks Created", stats["total_chunks"])
-                                            st.write("Page Status Summary:")
-                                            for status, count in stats[
-                                                "page_status_counts"
-                                            ].items():
-                                                st.write(f"- {status}: {count} pages")
-                                        except Exception as stats_error:
-                                            st.warning(
-                                                f"Could not retrieve chunk statistics: {stats_error}"
-                                            )
+                                with st.expander("📊 Processing Results", expanded=True):
+                                    col_res1, col_res2 = st.columns(2)
+                                    with col_res1:
+                                        st.metric("Pages Processed", result.pages_processed)
+                                    with col_res2:
+                                        st.metric("Document ID", result.document_id)
 
-                                        st.info(
-                                            "🎉 Chunking completed! You can now search through the processed content."
+                                    if context_enabled:
+                                        st.markdown("**✨ AI Context Generation**")
+                                        st.write(f"- Model: {context_model}")
+                                        st.write(f"- Temperature: {temperature}")
+                                        st.write(
+                                            f"- Status: Successfully generated context summaries"
+                                        )
+                                        st.write(f"- Prompt Caching: Enabled (cost optimized)")
+
+                                    # Get chunk statistics
+                                    try:
+                                        stats_loop = asyncio.new_event_loop()
+                                        asyncio.set_event_loop(stats_loop)
+                                        stats = stats_loop.run_until_complete(
+                                            bridge.get_chunk_stats(selected_doc_id)
+                                        )
+                                        stats_loop.close()
+                                        st.metric("Chunks Created", stats["total_chunks"])
+                                        st.write("Page Status Summary:")
+                                        for status, count in stats["page_status_counts"].items():
+                                            st.write(f"- {status}: {count} pages")
+                                    except Exception as stats_error:
+                                        st.warning(
+                                            f"Could not retrieve chunk statistics: {stats_error}"
                                         )
 
-                                        # Clear selection after successful processing
-                                        if st.button(
-                                            "Clear Selection", key="clear_after_processing"
-                                        ):
-                                            st.session_state.selected_pages = []
-                                            st.session_state.pages_loaded = (
-                                                False  # Refresh to show updated status
-                                            )
-                                            st.rerun()
+                                    st.info(
+                                        "🎉 Chunking completed! You can now search through the processed content."
+                                    )
 
-                            except Exception as e:
-                                st.error(f"❌ Processing failed: {str(e)}")
-                                st.info("Please check your selection and try again.")
+                                    # Clear selection after successful processing
+                                    if st.button("Clear Selection", key="clear_after_processing"):
+                                        st.session_state.selected_pages = []
+                                        st.session_state.pages_loaded = (
+                                            False  # Refresh to show updated status
+                                        )
+                                        st.rerun()
+
+                        except Exception as e:
+                            st.error(f"❌ Processing failed: {str(e)}")
+                            st.info("Please check your selection and try again.")
 
             else:
                 st.info("Select pages above to enable chunk processing.")

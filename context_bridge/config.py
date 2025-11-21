@@ -132,6 +132,44 @@ class Config(BaseModel):
         description="Maximum concurrent crawling operations",
     )
 
+    # AI Context Generation Settings
+    context_agent_model: str = Field(
+        default_factory=lambda: os.getenv(
+            "CONTEXT_AGENT_MODEL", "anthropic:claude-3-5-sonnet-20241022"
+        ),
+        description="Model for context generation agent (format: provider:model_name)",
+    )
+    context_agent_temperature: float = Field(
+        default_factory=lambda: float(os.getenv("CONTEXT_AGENT_TEMPERATURE", "0.3")),
+        description="Temperature for context generation (0.0-1.0)",
+        ge=0.0,
+        le=1.0,
+    )
+    context_agent_max_tokens: int = Field(
+        default_factory=lambda: int(os.getenv("CONTEXT_AGENT_MAX_TOKENS", "500")),
+        description="Max tokens for context generation response",
+        ge=1,
+    )
+    context_batch_size: int = Field(
+        default_factory=lambda: int(os.getenv("CONTEXT_BATCH_SIZE", "10")),
+        description="Number of chunks to process in parallel for context generation",
+        ge=1,
+    )
+    context_enable_cache: bool = Field(
+        default_factory=lambda: os.getenv("CONTEXT_ENABLE_CACHE", "true").lower() == "true",
+        description="Enable prompt caching for cost savings",
+    )
+
+    # API Keys for context generation
+    anthropic_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("ANTHROPIC_API_KEY"),
+        description="Anthropic API key for Claude models",
+    )
+    openai_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("OPENAI_API_KEY"),
+        description="OpenAI API key for GPT models",
+    )
+
     model_config = ConfigDict(
         env_file=".env",  # Optional .env loading - only loaded if file exists
         env_file_encoding="utf-8",

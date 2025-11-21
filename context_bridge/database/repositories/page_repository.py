@@ -566,6 +566,158 @@ class PageRepository:
             logger.error(f"Failed to validate {len(page_ids)} pages for chunking: {e}")
             raise
 
+    # Group Management Methods
+
+    async def get_pages_for_group(self, group_id: UUID) -> List[Page]:
+        """
+        Retrieve all pages in a specific group.
+
+        Args:
+            group_id: The group UUID
+
+        Returns:
+            List of Page objects in the group (ordered by id)
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            query = """
+                SELECT id, document_id, url, content, content_hash, content_length,
+                       crawled_at, status, group_id, metadata
+                FROM pages
+                WHERE group_id = $1
+                ORDER BY id
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [str(group_id)])
+                rows = result.result()
+
+            pages = [self._row_to_page(row) for row in rows]
+            logger.debug(f"Retrieved {len(pages)} pages for group {group_id}")
+            return pages
+
+        except Exception as e:
+            logger.error(f"Failed to get pages for group {group_id}: {e}")
+            raise
+
+    async def update_page_group(self, page_id: int, group_id: UUID) -> bool:
+        """
+        Assign a page to a group.
+
+        Args:
+            page_id: The page ID
+            group_id: The group UUID to assign to
+
+        Returns:
+            True if updated, False if page not found
+
+        Raises:
+            Exception: If FK constraint violated or query fails
+        """
+        try:
+            query = """
+                UPDATE pages
+                SET group_id = $1
+                WHERE id = $2
+                RETURNING id
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [str(group_id), page_id])
+                rows = result.result()
+
+            if rows:
+                logger.debug(f"Updated page {page_id} to group {group_id}")
+                return True
+            else:
+                logger.warning(f"Page {page_id} not found for group update")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to update page {page_id} group: {e}")
+            raise
+
+    async def remove_page_from_group(self, page_id: int) -> bool:
+        """
+        Remove a page from its group (set group_id to NULL).
+
+        Args:
+            page_id: The page ID
+
+        Returns:
+            True if updated, False if page not found
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            query = """
+                UPDATE pages
+                SET group_id = NULL
+                WHERE id = $1
+                RETURNING id
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [page_id])
+                rows = result.result()
+
+            if rows:
+                logger.debug(f"Removed page {page_id} from group")
+                return True
+            else:
+                logger.warning(f"Page {page_id} not found for group removal")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to remove page {page_id} from group: {e}")
+            raise
+
+    async def get_pages_by_group_and_status(
+        self, group_id: UUID, chunked: Optional[bool] = None
+    ) -> List[Page]:
+        """
+        Retrieve pages in a group, optionally filtered by chunked status.
+
+        Args:
+            group_id: The group UUID
+            chunked: If True, return only chunked pages
+                     If False, return only non-chunked pages
+                     If None, return all pages
+
+        Returns:
+            List of Page objects matching criteria (ordered by id)
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            query = "SELECT id, document_id, url, content, content_hash, content_length, crawled_at, status, group_id, metadata FROM pages WHERE group_id = $1"
+            params: List[str | int | bool] = [str(group_id)]
+
+            if chunked is not None:
+                status_filter = "chunked" if chunked else "pending"
+                query += f" AND status = ${len(params) + 1}"
+                params.append(status_filter)
+
+            query += " ORDER BY id"
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, params)
+                rows = result.result()
+
+            pages = [self._row_to_page(row) for row in rows]
+            logger.debug(
+                f"Retrieved {len(pages)} pages for group {group_id} with status filter: {chunked}"
+            )
+            return pages
+
+        except Exception as e:
+            logger.error(f"Failed to get pages by group and status for group {group_id}: {e}")
+            raise
+
     def _row_to_page(self, row: dict) -> Page:
         """
         Convert database row dict to Page model.

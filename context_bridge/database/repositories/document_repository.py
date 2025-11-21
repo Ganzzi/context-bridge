@@ -20,6 +20,7 @@ class Document(BaseModel):
         source_url: Optional URL where document was sourced
         description: Optional description of the document
         metadata: Additional metadata as JSON object
+        tags: List of tag IDs associated with this document (populated from TagRepository)
         created_at: Timestamp when document was created
         updated_at: Timestamp when document was last updated
     """
@@ -30,6 +31,7 @@ class Document(BaseModel):
     source_url: Optional[str] = None
     description: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
+    tags: List[int] = Field(default_factory=list)  # Tag IDs associated with document
     created_at: datetime
     updated_at: datetime
 

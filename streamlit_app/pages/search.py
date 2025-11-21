@@ -4,10 +4,14 @@ Search page for Context Bridge Streamlit app.
 
 import streamlit as st
 import asyncio
+import logging
 from typing import List, Optional
 from context_bridge.service.search_service import ContentSearchResult
 from utils.session_state import SessionState
 from components.search_results import render_search_results, render_search_stats
+from components.tag_selector import render_tag_selector_multiselect
+
+logger = logging.getLogger(__name__)
 
 st.title("🔍 Search Documentation")
 
@@ -85,6 +89,21 @@ with st.form("search_form"):
                 step=0.1,
                 help="Weight for keyword-based BM25 search (0 = vector only, 1 = BM25 only)",
             )
+
+        # Tag filtering
+        st.markdown("**Filter by Tags** (optional)")
+        try:
+            tags = asyncio.run(bridge.list_tags())
+            selected_tag_ids = render_tag_selector_multiselect(
+                tags,
+                key="search_page_tags",
+                placeholder="Select tags to narrow results...",
+                disabled=False,
+            )
+        except Exception as e:
+            logger.error(f"Failed to load tags: {e}")
+            selected_tag_ids = []
+            st.warning("Could not load tags for filtering")
 
     # Search button
     submitted = st.form_submit_button("🔍 Search", type="primary", use_container_width=True)

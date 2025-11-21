@@ -434,3 +434,361 @@ class TestDocManager:
         mock_page_repo.validate_pages_for_chunking.assert_called_once_with(
             [1], min_size=100, max_size=50000
         )
+
+
+class TestDocManagerGroupMethods:
+    """Unit tests for group-aware DocManager methods added in Phase 2.5.3."""
+
+    @pytest.fixture
+    def mock_db_manager(self):
+        """Create a mock database manager."""
+        manager = AsyncMock()
+        return manager
+
+    @pytest.fixture
+    def doc_manager(
+        self,
+        mock_db_manager,
+        mock_config,
+        mock_crawling_service,
+        mock_chunk_repo,
+        mock_embedding_service,
+    ):
+        """Create a DocManager with mocked dependencies."""
+        manager = AsyncMock(spec=DocManager)
+        manager.db_manager = mock_db_manager
+        manager.config = mock_config
+        manager.crawling_service = mock_crawling_service
+        manager.chunk_repo = mock_chunk_repo
+        manager.embedding_service = mock_embedding_service
+
+        # Mock repositories
+        manager.page_repo = AsyncMock(spec=PageRepository)
+        manager.doc_repo = AsyncMock(spec=DocumentRepository)
+
+        # Bind actual method to test
+        manager.process_group = DocManager.process_group.__get__(manager)
+        manager.get_document_groups = DocManager.get_document_groups.__get__(manager)
+        manager.reprocess_group = DocManager.reprocess_group.__get__(manager)
+
+        return manager
+
+    @pytest.fixture
+    def mock_chunk_service(self):
+        """Create a mock chunking service."""
+        service = MagicMock(spec=ChunkingService)
+        service.chunk_markdown.return_value = ["Chunk 1", "Chunk 2", "Chunk 3"]
+        return service
+
+    @pytest.fixture
+    def sample_group_id(self):
+        """Generate a sample group UUID."""
+        return uuid4()
+
+    @pytest.fixture
+    def sample_pages(self, sample_group_id):
+        """Create sample pages for testing."""
+        from context_bridge.database.repositories.page_repository import Page
+        from datetime import datetime
+
+        return [
+            Page(
+                id=1,
+                document_id=100,
+                url="https://example.com/page1",
+                content="# Page 1\nContent 1",
+                content_hash="hash1",
+                content_length=20,
+                crawled_at=datetime(2024, 1, 1, 12, 0, 0),
+                status="pending",
+                group_id=sample_group_id,
+                metadata={},
+            ),
+            Page(
+                id=2,
+                document_id=100,
+                url="https://example.com/page2",
+                content="# Page 2\nContent 2",
+                content_hash="hash2",
+                content_length=20,
+                crawled_at=datetime(2024, 1, 1, 12, 0, 1),
+                status="pending",
+                group_id=sample_group_id,
+                metadata={},
+            ),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_process_group_success(
+        self,
+        doc_manager,
+        sample_group_id,
+        sample_pages,
+        mock_chunk_repo,
+        mock_embedding_service,
+        mock_chunk_service,
+    ):
+        """Test successful group processing."""
+        # Setup mocks
+        doc_manager.page_repo.get_pages_for_group = AsyncMock(return_value=sample_pages)
+        doc_manager.chunking_service = mock_chunk_service
+        doc_manager.embedding_service = mock_embedding_service
+
+        mock_embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+        )
+        mock_chunk_repo.create_batch = AsyncMock(return_value=[1, 2, 3])
+
+        # Execute
+        result = await doc_manager.process_group(sample_group_id)
+
+        # Verify
+        assert result["status"] in ["success", "partial"]
+        assert result["total_pages"] == 2
+        assert result["chunks_created"] == 6  # 3 chunks per page * 2 pages
+        assert result["errors"] == 0
+
+        doc_manager.page_repo.get_pages_for_group.assert_called_once_with(sample_group_id)
+        assert mock_chunk_repo.create_batch.call_count == 2  # Called for each page
+
+    @pytest.mark.asyncio
+    async def test_process_group_empty(self, doc_manager, sample_group_id):
+        """Test processing when group has no pages."""
+        # Setup mocks
+        doc_manager.page_repo.get_pages_for_group = AsyncMock(return_value=[])
+
+        # Execute
+        result = await doc_manager.process_group(sample_group_id)
+
+        # Verify
+        assert result["status"] == "success"
+        assert result["total_pages"] == 0
+        assert result["chunks_created"] == 0
+
+    @pytest.mark.asyncio
+    async def test_process_group_with_context(
+        self,
+        doc_manager,
+        sample_group_id,
+        sample_pages,
+        mock_chunk_repo,
+        mock_embedding_service,
+        mock_chunk_service,
+    ):
+        """Test group processing with context generation enabled."""
+        # Setup mocks
+        doc_manager.page_repo.get_pages_for_group = AsyncMock(return_value=sample_pages)
+        doc_manager.chunking_service = mock_chunk_service
+        doc_manager.embedding_service = mock_embedding_service
+
+        mock_embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+        )
+        mock_chunk_repo.create_batch = AsyncMock(return_value=[1, 2, 3])
+
+        # Execute
+        result = await doc_manager.process_group(
+            sample_group_id,
+            context_enabled=True,
+            context_model="anthropic:claude-3-5-sonnet",
+        )
+
+        # Verify
+        assert result["chunks_created"] == 6
+        # Verify that context was included in chunk data
+        call_args = mock_chunk_repo.create_batch.call_args
+        chunk_data = call_args[0][0]
+        assert any("context" in chunk for chunk in chunk_data)
+
+    @pytest.mark.asyncio
+    async def test_process_group_with_error(
+        self, doc_manager, sample_group_id, sample_pages, mock_chunk_repo
+    ):
+        """Test group processing with partial errors."""
+        # Setup mocks - first page succeeds, second page fails
+        doc_manager.page_repo.get_pages_for_group = AsyncMock(return_value=sample_pages)
+        doc_manager.chunking_service = MagicMock(spec=ChunkingService)
+        doc_manager.chunking_service.chunk_markdown.side_effect = [
+            ["Chunk 1", "Chunk 2", "Chunk 3"],
+            Exception("Chunking error"),
+        ]
+
+        doc_manager.embedding_service = AsyncMock()
+        doc_manager.embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+        )
+        mock_chunk_repo.create_batch = AsyncMock(return_value=[1, 2, 3])
+
+        # Execute
+        result = await doc_manager.process_group(sample_group_id)
+
+        # Verify
+        assert result["status"] in ["success", "partial"]
+        assert result["total_pages"] == 2
+        assert result["errors"] == 1
+        assert result["chunks_created"] == 3  # Only first page processed
+
+    @pytest.mark.asyncio
+    async def test_get_document_groups_success(self, doc_manager):
+        """Test successful retrieval of document groups."""
+        # Setup mocks
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = [
+            {
+                "id": uuid4(),
+                "name": "Group 1",
+                "context_enabled": False,
+                "total_pages": 5,
+                "total_chunks": 15,
+                "processing_status": "completed",
+            },
+            {
+                "id": uuid4(),
+                "name": "Group 2",
+                "context_enabled": True,
+                "total_pages": 3,
+                "total_chunks": 9,
+                "processing_status": "completed",
+            },
+        ]
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        doc_manager.db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        # Execute
+        groups = await doc_manager.get_document_groups(100)
+
+        # Verify
+        assert len(groups) == 2
+        assert groups[0]["name"] == "Group 1"
+        assert groups[1]["name"] == "Group 2"
+        assert groups[0]["context_enabled"] is False
+        assert groups[1]["context_enabled"] is True
+
+        mock_conn.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_document_groups_empty(self, doc_manager):
+        """Test retrieval when document has no groups."""
+        # Setup mocks
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = []
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        doc_manager.db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        # Execute
+        groups = await doc_manager.get_document_groups(100)
+
+        # Verify
+        assert groups == []
+
+    @pytest.mark.asyncio
+    async def test_get_document_groups_db_error(self, doc_manager):
+        """Test error handling for group retrieval."""
+        # Setup mocks
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(side_effect=Exception("DB Error"))
+        doc_manager.db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        # Execute and verify
+        with pytest.raises(Exception) as exc_info:
+            await doc_manager.get_document_groups(100)
+
+        assert "DB Error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_reprocess_group_without_force_rechunk(
+        self,
+        doc_manager,
+        sample_group_id,
+        sample_pages,
+        mock_chunk_repo,
+        mock_embedding_service,
+        mock_chunk_service,
+    ):
+        """Test reprocessing without deleting existing chunks."""
+        # Setup mocks
+        doc_manager.page_repo.get_pages_for_group = AsyncMock(return_value=sample_pages)
+        doc_manager.chunking_service = mock_chunk_service
+        doc_manager.embedding_service = mock_embedding_service
+        doc_manager.chunk_repo = mock_chunk_repo
+
+        mock_embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+        )
+        mock_chunk_repo.create_batch = AsyncMock(return_value=[1, 2, 3])
+        mock_chunk_repo.delete_by_group = AsyncMock(return_value=0)
+
+        # Execute
+        result = await doc_manager.reprocess_group(sample_group_id, force_rechunk=False)
+
+        # Verify
+        assert result["status"] in ["success", "partial"]
+        assert result["chunks_deleted"] == 0
+        mock_chunk_repo.delete_by_group.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reprocess_group_with_force_rechunk(
+        self,
+        doc_manager,
+        sample_group_id,
+        sample_pages,
+        mock_chunk_repo,
+        mock_embedding_service,
+        mock_chunk_service,
+    ):
+        """Test reprocessing with deletion of existing chunks."""
+        # Setup mocks
+        doc_manager.page_repo.get_pages_for_group = AsyncMock(return_value=sample_pages)
+        doc_manager.chunking_service = mock_chunk_service
+        doc_manager.embedding_service = mock_embedding_service
+        doc_manager.chunk_repo = mock_chunk_repo
+
+        mock_embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+        )
+        mock_chunk_repo.create_batch = AsyncMock(return_value=[1, 2, 3])
+        mock_chunk_repo.delete_by_group = AsyncMock(return_value=6)  # 6 chunks deleted
+
+        # Execute
+        result = await doc_manager.reprocess_group(sample_group_id, force_rechunk=True)
+
+        # Verify
+        assert result["chunks_deleted"] == 6
+        mock_chunk_repo.delete_by_group.assert_called_once_with(sample_group_id)
+
+    @pytest.mark.asyncio
+    async def test_reprocess_group_with_context_update(
+        self,
+        doc_manager,
+        sample_group_id,
+        sample_pages,
+        mock_chunk_repo,
+        mock_embedding_service,
+        mock_chunk_service,
+    ):
+        """Test reprocessing with context settings update."""
+        # Setup mocks
+        doc_manager.page_repo.get_pages_for_group = AsyncMock(return_value=sample_pages)
+        doc_manager.chunking_service = mock_chunk_service
+        doc_manager.embedding_service = mock_embedding_service
+        doc_manager.chunk_repo = mock_chunk_repo
+
+        mock_embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+        )
+        mock_chunk_repo.create_batch = AsyncMock(return_value=[1, 2, 3])
+        mock_chunk_repo.delete_by_group = AsyncMock(return_value=6)
+
+        # Execute with new context settings
+        result = await doc_manager.reprocess_group(
+            sample_group_id,
+            force_rechunk=True,
+            context_enabled=True,
+            context_model="anthropic:claude-3-5-sonnet",
+        )
+
+        # Verify
+        assert result["chunks_deleted"] == 6
+        assert result["chunks_created"] == 6

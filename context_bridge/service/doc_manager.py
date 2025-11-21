@@ -23,6 +23,7 @@ from context_bridge.database.repositories.chunk_repository import ChunkRepositor
 from context_bridge.service.crawling_service import CrawlingService
 from context_bridge.service.chunking_service import ChunkingService
 from context_bridge.service.embedding import EmbeddingService
+from context_bridge.service.context_agent import ContextGenerationAgent
 
 logger = logging.getLogger(__name__)
 
@@ -485,3 +486,273 @@ class DocManager:
                 logger.info(f"✅ Reset {len(page_ids)} pages to 'pending' status after error")
             except Exception as status_error:
                 logger.error(f"❌ Failed to reset page status on error: {status_error}")
+
+    async def process_group(
+        self,
+        group_id: UUID,
+        context_enabled: bool = False,
+        context_model: Optional[str] = None,
+    ) -> dict:
+        """
+        Process a specific group through chunking and optional context generation.
+
+        This method retrieves all pages in a group, chunks them, generates embeddings,
+        and optionally creates AI-generated context for each chunk.
+
+        Args:
+            group_id: UUID of the group to process
+            context_enabled: Whether to generate context for chunks
+            context_model: The model to use for context generation (e.g., "anthropic:claude-3-5-sonnet")
+
+        Returns:
+            Dictionary with processing results:
+            - status: "success" or "failed"
+            - total_pages: Number of pages in group
+            - pages_processed: Number of pages successfully processed
+            - chunks_created: Number of chunks created
+            - errors: Number of processing errors
+
+        Raises:
+            ValueError: If group not found or invalid
+            Exception: If processing fails
+        """
+        logger.info(f"🔄 Processing group {group_id}")
+
+        try:
+            # Retrieve all pages in the group
+            pages = await self.page_repo.get_pages_for_group(group_id)
+            if not pages:
+                logger.warning(f"⚠️  No pages found for group {group_id}")
+                return {
+                    "status": "success",
+                    "total_pages": 0,
+                    "pages_processed": 0,
+                    "chunks_created": 0,
+                    "errors": 0,
+                }
+
+            logger.info(f"📋 Found {len(pages)} pages in group {group_id}")
+
+            # Combine all page content for context generation (if needed)
+            combined_content = ""
+            if context_enabled:
+                combined_content = "\n\n".join([page.content for page in pages])
+                logger.debug(
+                    f"📖 Combined {len(pages)} pages ({len(combined_content)} chars) for context generation"
+                )
+
+            # Initialize context agent if needed
+            context_agent = None
+            if context_enabled and context_model:
+                context_agent = ContextGenerationAgent(self.config)
+                logger.info(f"🤖 Initialized context agent with model {context_model}")
+
+            # Process each page
+            total_chunks = 0
+            errors = 0
+            all_chunk_texts = []  # For batch context generation
+
+            for page in pages:
+                try:
+                    # Extract chunks from page content
+                    chunks = self.chunking_service.chunk_markdown(page.content)
+                    logger.debug(f"📦 Generated {len(chunks)} chunks from page {page.id}")
+
+                    if not chunks:
+                        logger.warning(f"⚠️  No chunks generated from page {page.id}")
+                        continue
+
+                    # Collect chunk texts for batch context generation
+                    if context_enabled:
+                        all_chunk_texts.extend(chunks)
+
+                    # Generate embeddings
+                    embeddings = await self.embedding_service.get_embeddings_batch(chunks)
+                    logger.debug(f"🧮 Generated embeddings for {len(chunks)} chunks")
+
+                    # Create chunk records
+                    chunk_data = []
+                    for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+                        chunk_entry = {
+                            "document_id": page.document_id,
+                            "chunk_index": i,
+                            "content": chunk_text,
+                            "embedding": embedding,
+                            "group_id": group_id,
+                        }
+                        chunk_data.append(chunk_entry)
+
+                    # Batch create chunks
+                    chunk_ids = await self.chunk_repo.create_batch(chunk_data)
+                    total_chunks += len(chunk_ids)
+                    logger.info(f"✅ Created {len(chunk_ids)} chunks for page {page.id}")
+
+                except Exception as e:
+                    logger.error(f"❌ Error processing page {page.id}: {e}")
+                    errors += 1
+
+            # Generate contexts for all chunks if enabled
+            if context_enabled and context_agent and all_chunk_texts:
+                try:
+                    logger.info(f"🤖 Generating contexts for {len(all_chunk_texts)} chunks...")
+                    contexts = await context_agent.generate_contexts_batch(
+                        all_chunk_texts, combined_content
+                    )
+
+                    # Update chunks with contexts
+                    updated = 0
+                    for i, context in enumerate(contexts):
+                        if context:  # Only update if context was generated
+                            try:
+                                await self.chunk_repo.prepend_context_to_chunk(i, context)
+                                updated += 1
+                            except Exception as e:
+                                logger.warning(f"⚠️  Failed to update chunk {i} with context: {e}")
+
+                    logger.info(
+                        f"✅ Updated {updated}/{len(contexts)} chunks with generated context"
+                    )
+
+                except Exception as e:
+                    logger.error(f"❌ Failed to generate contexts: {e}")
+                    # Continue processing even if context generation fails
+
+            logger.info(
+                f"🎉 Group {group_id} processing complete: {total_chunks} chunks created, {errors} errors"
+            )
+
+            return {
+                "status": "success" if errors == 0 else "partial",
+                "total_pages": len(pages),
+                "pages_processed": len(pages) - errors,
+                "chunks_created": total_chunks,
+                "errors": errors,
+            }
+
+        except Exception as e:
+            logger.error(f"💥 Failed to process group {group_id}: {e}")
+            raise
+
+    async def get_document_groups(self, document_id: int) -> List[dict]:
+        """
+        Retrieve all groups associated with a document.
+
+        Args:
+            document_id: The document ID
+
+        Returns:
+            List of group information dictionaries, each containing:
+            - id: Group UUID
+            - name: Optional group name
+            - context_enabled: Whether context generation is enabled
+            - total_pages: Number of pages in group
+            - total_chunks: Number of chunks in group
+            - processing_status: Current processing status
+
+        Raises:
+            Exception: If database query fails
+        """
+        logger.debug(f"📋 Retrieving groups for document {document_id}")
+
+        try:
+            # Query groups table for this document
+            # This would normally use a repository method, but for now we'll use a direct query
+            query = """
+                SELECT 
+                    id,
+                    name,
+                    context_enabled,
+                    total_pages,
+                    total_chunks,
+                    processing_status
+                FROM groups
+                WHERE document_id = $1
+                ORDER BY created_at DESC
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [document_id])
+                rows = result.result()
+
+            groups = [
+                {
+                    "id": row["id"],
+                    "name": row.get("name"),
+                    "context_enabled": row["context_enabled"],
+                    "total_pages": row["total_pages"],
+                    "total_chunks": row["total_chunks"],
+                    "processing_status": row["processing_status"],
+                }
+                for row in rows
+            ]
+
+            logger.info(f"📋 Found {len(groups)} groups for document {document_id}")
+            return groups
+
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve groups for document {document_id}: {e}")
+            raise
+
+    async def reprocess_group(
+        self,
+        group_id: UUID,
+        force_rechunk: bool = False,
+        context_enabled: bool = False,
+        context_model: Optional[str] = None,
+    ) -> dict:
+        """
+        Re-process an existing group with optional new settings.
+
+        This method deletes existing chunks for the group and re-processes all pages
+        with the new settings. Useful for updating context settings or fixing errors.
+
+        Args:
+            group_id: UUID of the group to reprocess
+            force_rechunk: If True, delete existing chunks before re-chunking
+            context_enabled: Enable context generation for new chunks
+            context_model: Model to use for context generation
+
+        Returns:
+            Dictionary with reprocessing results:
+            - status: "success" or "failed"
+            - chunks_deleted: Number of chunks deleted
+            - chunks_created: Number of new chunks created
+            - errors: Number of processing errors
+
+        Raises:
+            ValueError: If group not found
+            Exception: If reprocessing fails
+        """
+        logger.info(f"🔄 Reprocessing group {group_id} (force_rechunk={force_rechunk})")
+
+        try:
+            # Delete existing chunks if requested
+            chunks_deleted = 0
+            if force_rechunk:
+                try:
+                    logger.debug(f"🗑️  Deleting existing chunks for group {group_id}")
+                    chunks_deleted = await self.chunk_repo.delete_by_group(group_id)
+                    logger.info(f"✅ Deleted {chunks_deleted} chunks for group {group_id}")
+                except Exception as e:
+                    logger.error(f"❌ Error deleting chunks for group {group_id}: {e}")
+                    raise
+
+            # Re-process the group with new settings
+            result = await self.process_group(
+                group_id=group_id,
+                context_enabled=context_enabled,
+                context_model=context_model,
+            )
+
+            result["chunks_deleted"] = chunks_deleted
+
+            logger.info(
+                f"🎉 Group {group_id} reprocessing complete: {chunks_deleted} deleted, "
+                f"{result['chunks_created']} created"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"💥 Failed to reprocess group {group_id}: {e}")
+            raise

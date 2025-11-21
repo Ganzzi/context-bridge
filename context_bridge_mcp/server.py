@@ -1,5 +1,6 @@
-"""MCP Server implementation for Context Bridge."""
+﻿"""MCP Server implementation for Context Bridge."""
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, AsyncIterator
@@ -64,7 +65,8 @@ async def handle_list_tools() -> list[types.Tool]:
             description=(
                 "Find documentation by name, version, or query. "
                 "Search through available documentation sources to locate specific documents "
-                "or browse all available documentation. Supports filtering by name and version."
+                "or browse all available documentation. Supports filtering by name, version, and tags. "
+                "Returns documents with their tags for categorization."
             ),
             inputSchema=FIND_DOCUMENTS_INPUT_SCHEMA,
         ),
@@ -144,6 +146,7 @@ async def _handle_find_documents(
                         "version": doc.version,
                         "description": doc.description,
                         "source_url": doc.source_url or "",
+                        "tags": doc.tags,  # List of tag IDs associated with this document
                         "total_pages": 0,  # TODO: Get actual page count
                         "total_chunks": 0,  # TODO: Get actual chunk count
                         "created_at": doc.created_at.isoformat(),
@@ -153,8 +156,6 @@ async def _handle_find_documents(
                 "count": len(documents),
             }
 
-        import json
-
         return [types.TextContent(type="text", text=json.dumps(response, indent=2))]
     except Exception as e:
         logger.error(f"Error executing find_documents: {e}", exc_info=True)
@@ -163,8 +164,6 @@ async def _handle_find_documents(
             "documents": [],
             "count": 0,
         }
-        import json
-
         return [types.TextContent(type="text", text=json.dumps(error_response, indent=2))]
 
 
@@ -220,8 +219,6 @@ async def _handle_search_content(
                     "document_id": document_id,
                 }
 
-        import json
-
         return [types.TextContent(type="text", text=json.dumps(response, indent=2))]
     except Exception as e:
         logger.error(f"Error executing search_content: {e}", exc_info=True)
@@ -230,6 +227,4 @@ async def _handle_search_content(
             "results": [],
             "count": 0,
         }
-        import json
-
-        return [types.TextContent(type="text", text=json.dumps(error_response, indent=2))]
+        return [types.TextContent(type="text", text=json.dumps(response, indent=2))]

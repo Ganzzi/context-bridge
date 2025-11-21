@@ -539,3 +539,280 @@ class TestPageRepositoryUnit:
         page = repo._row_to_page(row)
 
         assert page.metadata == {}
+
+
+class TestPageRepositoryGroupMethods:
+    """
+    Unit tests for group-aware methods added in Phase 2.5.3.
+    """
+
+    @pytest.fixture
+    def mock_db_manager(self):
+        """Create a mock PostgreSQLManager for testing."""
+        manager = AsyncMock(spec=PostgreSQLManager)
+        return manager
+
+    @pytest.fixture
+    def repo(self, mock_db_manager):
+        """Create a PageRepository with mocked database manager."""
+        return PageRepository(mock_db_manager)
+
+    @pytest.fixture
+    def sample_group_id(self):
+        """Generate a sample group UUID."""
+        from uuid import UUID
+
+        return UUID("550e8400-e29b-41d4-a716-446655440000")
+
+    @pytest.fixture
+    def sample_pages_with_group(self, sample_group_id):
+        """Create sample page rows with group_id for testing."""
+        return [
+            {
+                "id": 1,
+                "document_id": 100,
+                "url": "https://example.com/page1",
+                "content": "Content 1",
+                "content_hash": "hash1",
+                "content_length": 9,
+                "crawled_at": datetime(2024, 1, 1, 12, 0, 0),
+                "status": "chunked",
+                "group_id": sample_group_id,
+                "metadata": {},
+            },
+            {
+                "id": 2,
+                "document_id": 100,
+                "url": "https://example.com/page2",
+                "content": "Content 2",
+                "content_hash": "hash2",
+                "content_length": 9,
+                "crawled_at": datetime(2024, 1, 1, 12, 0, 1),
+                "status": "chunked",
+                "group_id": sample_group_id,
+                "metadata": {},
+            },
+            {
+                "id": 3,
+                "document_id": 100,
+                "url": "https://example.com/page3",
+                "content": "Content 3",
+                "content_hash": "hash3",
+                "content_length": 9,
+                "crawled_at": datetime(2024, 1, 1, 12, 0, 2),
+                "status": "pending",
+                "group_id": sample_group_id,
+                "metadata": {},
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_get_pages_for_group_success(
+        self, repo, mock_db_manager, sample_group_id, sample_pages_with_group
+    ):
+        """
+        Test successful retrieval of pages for a group.
+        """
+        # Mock the connection and execute
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = sample_pages_with_group
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        # Call the method
+        pages = await repo.get_pages_for_group(sample_group_id)
+
+        # Assertions
+        assert len(pages) == 3
+        assert all(page.group_id == sample_group_id for page in pages)
+        assert pages[0].url == "https://example.com/page1"
+        assert pages[1].url == "https://example.com/page2"
+        assert pages[2].url == "https://example.com/page3"
+
+        # Verify the query was called correctly
+        mock_conn.execute.assert_called_once()
+        call_args = mock_conn.execute.call_args
+        assert "WHERE group_id = $1" in call_args[0][0]
+        assert str(sample_group_id) in call_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_get_pages_for_group_empty(self, repo, mock_db_manager, sample_group_id):
+        """
+        Test retrieval when no pages exist for group.
+        """
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = []
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        pages = await repo.get_pages_for_group(sample_group_id)
+
+        assert pages == []
+        mock_conn.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_pages_for_group_db_error(self, repo, mock_db_manager, sample_group_id):
+        """
+        Test error handling when database query fails.
+        """
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(side_effect=Exception("DB Error"))
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        with pytest.raises(Exception) as exc_info:
+            await repo.get_pages_for_group(sample_group_id)
+
+        assert "DB Error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_update_page_group_success(self, repo, mock_db_manager, sample_group_id):
+        """
+        Test successful update of page group assignment.
+        """
+        page_id = 1
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        # Simulate one row affected
+        mock_result.result.return_value = [{"id": page_id}]
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.update_page_group(page_id, sample_group_id)
+
+        assert result is True
+        mock_conn.execute.assert_called_once()
+        call_args = mock_conn.execute.call_args
+        assert "UPDATE pages SET group_id = $1 WHERE id = $2" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_update_page_group_not_found(self, repo, mock_db_manager, sample_group_id):
+        """
+        Test update when page doesn't exist (no rows affected).
+        """
+        page_id = 999
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = []  # No rows affected
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.update_page_group(page_id, sample_group_id)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_remove_page_from_group_success(self, repo, mock_db_manager):
+        """
+        Test successful removal of page from group.
+        """
+        page_id = 1
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = [{"id": page_id}]
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.remove_page_from_group(page_id)
+
+        assert result is True
+        mock_conn.execute.assert_called_once()
+        call_args = mock_conn.execute.call_args
+        assert "UPDATE pages SET group_id = NULL WHERE id = $1" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_remove_page_from_group_not_found(self, repo, mock_db_manager):
+        """
+        Test removal when page doesn't exist.
+        """
+        page_id = 999
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = []
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.remove_page_from_group(page_id)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_pages_by_group_and_status_chunked(
+        self, repo, mock_db_manager, sample_group_id, sample_pages_with_group
+    ):
+        """
+        Test filtering pages by group and chunked status.
+        """
+        chunked_pages = [sample_pages_with_group[0], sample_pages_with_group[1]]
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = chunked_pages
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        pages = await repo.get_pages_by_group_and_status(sample_group_id, chunked=True)
+
+        assert len(pages) == 2
+        assert all(page.status == "chunked" for page in pages)
+        call_args = mock_conn.execute.call_args
+        assert "status = $2" in call_args[0][0]
+        assert "chunked" in call_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_get_pages_by_group_and_status_pending(
+        self, repo, mock_db_manager, sample_group_id, sample_pages_with_group
+    ):
+        """
+        Test filtering pages by group and pending status.
+        """
+        pending_pages = [sample_pages_with_group[2]]
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = pending_pages
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        pages = await repo.get_pages_by_group_and_status(sample_group_id, chunked=False)
+
+        assert len(pages) == 1
+        assert pages[0].status == "pending"
+        call_args = mock_conn.execute.call_args
+        assert "pending" in call_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_get_pages_by_group_and_status_no_filter(
+        self, repo, mock_db_manager, sample_group_id, sample_pages_with_group
+    ):
+        """
+        Test retrieving all pages in group without status filter.
+        """
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = sample_pages_with_group
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        pages = await repo.get_pages_by_group_and_status(sample_group_id, chunked=None)
+
+        assert len(pages) == 3
+        call_args = mock_conn.execute.call_args
+        # Should not have status filter
+        assert "status = $2" not in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_get_pages_by_group_and_status_empty(
+        self, repo, mock_db_manager, sample_group_id
+    ):
+        """
+        Test when no pages match the filters.
+        """
+        mock_conn = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.result.return_value = []
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_db_manager.connection.return_value.__aenter__.return_value = mock_conn
+
+        pages = await repo.get_pages_by_group_and_status(sample_group_id, chunked=True)
+
+        assert pages == []

@@ -208,7 +208,9 @@ class TestMCPTools:
         """Test tool discovery."""
         tools = await handle_list_tools()
 
-        assert len(tools) == 2
+        # Should have 7 tools: find_documents, search_content, list_tags, add_document_tags,
+        # remove_tag_from_document, list_groups, get_group_status
+        assert len(tools) == 7
 
         # Check find_documents tool
         find_tool = next(t for t in tools if t.name == "find_documents")
@@ -224,6 +226,12 @@ class TestMCPTools:
             in search_tool.description
         )
         assert search_tool.inputSchema == SEARCH_CONTENT_INPUT_SCHEMA
+
+        # Check that tag and group tools are present
+        tag_tools = [t for t in tools if "tag" in t.name.lower()]
+        group_tools = [t for t in tools if "group" in t.name.lower()]
+        assert len(tag_tools) == 3  # list_tags, add_document_tags, remove_tag_from_document
+        assert len(group_tools) == 2  # list_groups, get_group_status
 
     @pytest.mark.asyncio
     async def test_call_tool_find_documents(self, mock_bridge, mock_server_context):

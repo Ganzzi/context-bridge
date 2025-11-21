@@ -447,25 +447,51 @@ async with db_manager.connection() as conn:
         )
 ```
 
-### Organizing Pages into Groups
+### Organizing Pages into Groups (Phase 2)
+
+Context Bridge v2 introduces **explicit group management** for better organization and future AI context generation.
 
 ```python
-from context_bridge.repositories.group_repository import GroupRepository
+from context_bridge import ContextBridge
 
-# User manually selects pages to group
-page_ids = [1, 2, 3, 4, 5]
-
-# Create a group
-async with db_manager.connection() as conn:
-    group_repo = GroupRepository(conn)
+async def organize_documentation():
+    bridge = ContextBridge()
     
-    group_id = await group_repo.create_group(
+    # Process specific pages as a group
+    result = await bridge.process_pages(
         document_id=doc_id,
-        page_ids=page_ids,
-        min_size=1000,   # Minimum total content size
-        max_size=50000   # Maximum total content size
+        page_ids=[1, 2, 3, 4, 5],
+        chunk_size=2000,
+        group_name="API Reference",
+        group_description="REST API endpoints and examples"
     )
+    
+    print(f"Group created: {result.group_id}")
+    print(f"Pages processed: {result.pages_processed}")
+    print(f"Chunks created: {result.total_chunks}")
+    
+    # List all groups for a document
+    groups = await bridge.list_groups(document_id=doc_id)
+    for group in groups:
+        print(f"\n{group['name']} ({group['processing_status']})")
+        print(f"  Pages: {group['total_pages']}")
+        print(f"  Chunks: {group['total_chunks']}")
+    
+    # Get detailed group information
+    group_info = await bridge.get_group_info(group_id=result.group_id)
+    print(f"\nGroup Details:")
+    print(f"  Created: {group_info['created_at']}")
+    print(f"  Context Enabled: {group_info['context_enabled']}")
 ```
+
+**Key Features**:
+- ✅ Name and describe page groups
+- ✅ Track processing status (pending → processing → completed)
+- ✅ View group statistics (pages, chunks, content size)
+- ✅ Re-process groups with new settings
+- ✅ Foundation for AI context generation (Phase 3)
+
+See [Groups System Guide](./docs/guides/groups_system_guide.md) for comprehensive documentation.
 
 ### Chunking and Embedding
 

@@ -603,6 +603,246 @@ class ChunkRepository:
             logger.error(f"Failed to delete chunks for group {group_id}: {e}")
             raise
 
+    # Group Management Methods
+
+    async def get_chunks_for_group(self, group_id: UUID, limit: int = 1000) -> List[Chunk]:
+        """
+        Retrieve all chunks in a specific group.
+
+        Args:
+            group_id: The group UUID
+            limit: Maximum number of chunks to return (default 1000)
+
+        Returns:
+            List of Chunk objects (ordered by id, limited)
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            query = """
+                SELECT id, document_id, group_id, chunk_index, content, embedding, created_at
+                FROM chunks
+                WHERE group_id = $1
+                ORDER BY id
+                LIMIT $2
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [str(group_id), limit])
+                rows = result.result()
+
+            chunks = [self._row_to_chunk(row) for row in rows]
+            logger.debug(f"Retrieved {len(chunks)} chunks for group {group_id}")
+            return chunks
+
+        except Exception as e:
+            logger.error(f"Failed to get chunks for group {group_id}: {e}")
+            raise
+
+    async def get_group_chunk_statistics(self, group_id: UUID) -> dict:
+        """
+        Get aggregated statistics for all chunks in a group.
+
+        Args:
+            group_id: The group UUID
+
+        Returns:
+            Dictionary with keys:
+            - total_chunks: int
+            - total_content_length: int
+            - avg_chunk_size: float
+            - chunks_with_context: int (if context column exists)
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            query = """
+                SELECT 
+                    COUNT(*) as total_chunks,
+                    SUM(LENGTH(content)) as total_length,
+                    AVG(LENGTH(content)) as avg_size
+                FROM chunks
+                WHERE group_id = $1
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [str(group_id)])
+                rows = result.result()
+
+            if not rows or not rows[0]["total_chunks"]:
+                return {
+                    "total_chunks": 0,
+                    "total_content_length": 0,
+                    "avg_chunk_size": 0.0,
+                }
+
+            row = rows[0]
+            return {
+                "total_chunks": row["total_chunks"] or 0,
+                "total_content_length": row["total_length"] or 0,
+                "avg_chunk_size": float(row["avg_size"] or 0.0),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get statistics for group {group_id}: {e}")
+            raise
+
+    async def search_chunks_in_group(
+        self,
+        query_text: str,
+        embedding: List[float],
+        group_id: UUID,
+        hybrid: bool = True,
+        limit: int = 10,
+    ) -> List[SearchResult]:
+        """
+        Perform hybrid search within a specific group.
+
+        Args:
+            query_text: Search query text
+            embedding: Query embedding vector
+            group_id: Restrict search to this group
+            hybrid: If True, use both vector and BM25
+                    If False, use only BM25
+            limit: Maximum results to return
+
+        Returns:
+            Ranked list of matching chunks (best matches first)
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            if hybrid:
+                # Hybrid search: weighted combination of vector and BM25
+                query = """
+                    SELECT id, document_id, group_id, chunk_index, content, embedding, created_at,
+                           (0.7 * (1 - (embedding <-> $1::vector)) + 
+                            0.3 * (ts_rank_cd(to_tsvector(content), to_tsquery($2)))) as relevance
+                    FROM chunks
+                    WHERE group_id = $3
+                    ORDER BY relevance DESC
+                    LIMIT $4
+                """
+                params = [embedding, query_text, str(group_id), limit]
+            else:
+                # BM25 search only
+                query = """
+                    SELECT id, document_id, group_id, chunk_index, content, embedding, created_at,
+                           ts_rank_cd(to_tsvector(content), to_tsquery($1)) as relevance
+                    FROM chunks
+                    WHERE group_id = $2 AND to_tsvector(content) @@ to_tsquery($1)
+                    ORDER BY relevance DESC
+                    LIMIT $3
+                """
+                params = [query_text, str(group_id), limit]
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, params)
+                rows = result.result()
+
+            search_results = [
+                SearchResult(
+                    chunk=self._row_to_chunk(row),
+                    score=row.get("relevance", 0.0),
+                    rank=idx + 1,
+                )
+                for idx, row in enumerate(rows)
+            ]
+
+            logger.debug(f"Found {len(search_results)} results in group {group_id}")
+            return search_results
+
+        except Exception as e:
+            logger.error(f"Failed to search chunks in group {group_id}: {e}")
+            raise
+
+    async def update_chunks_group_reference(self, page_id: int, group_id: UUID) -> int:
+        """
+        Update group reference for all chunks containing a specific page.
+
+        Since chunks have source_page_ids (array), this finds chunks where
+        the page_id is in the source_page_ids array and updates group_id.
+
+        Args:
+            page_id: The page ID to search for in source_page_ids
+            group_id: The new group UUID to assign
+
+        Returns:
+            Number of chunks updated
+
+        Raises:
+            Exception: If query fails
+        """
+        try:
+            query = """
+                UPDATE chunks
+                SET group_id = $1
+                WHERE $2 = ANY(source_page_ids)
+                RETURNING id
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [str(group_id), page_id])
+                rows = result.result()
+
+            count = len(rows) if rows else 0
+            logger.debug(f"Updated {count} chunks containing page {page_id} to group {group_id}")
+            return count
+
+        except Exception as e:
+            logger.error(f"Failed to update chunks group reference for page {page_id}: {e}")
+            raise
+
+    async def prepend_context_to_chunk(self, chunk_index: int, context: str) -> bool:
+        """
+        Prepend context to a chunk's content.
+
+        This is used when generating AI contexts for chunks. The context is
+        prepended to the chunk content separated by newlines.
+
+        Args:
+            chunk_index: The index of the chunk (0-based)
+            context: The context text to prepend
+
+        Returns:
+            True if update succeeded, False otherwise
+
+        Note:
+            This method uses chunk_index which requires caution as chunk indices
+            are local to a page. This is primarily used internally during batch
+            context updates right after chunk creation. For production use,
+            consider using chunk ID instead.
+        """
+        if not context or not context.strip():
+            logger.warning(f"⚠️  Empty context provided for chunk {chunk_index}")
+            return False
+
+        try:
+            query = """
+                UPDATE chunks
+                SET content = $1 || E'\n\n' || content
+                WHERE chunk_index = $2
+                RETURNING id
+            """
+
+            async with self.db_manager.connection() as conn:
+                result = await conn.execute(query, [context, chunk_index])
+                rows = result.result()
+
+            if rows:
+                logger.debug(f"✅ Prepended context to chunk {chunk_index}")
+                return True
+            else:
+                logger.warning(f"⚠️  No chunk found with index {chunk_index}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Failed to prepend context to chunk {chunk_index}: {e}")
+            return False
+
     def _row_to_chunk(self, row: dict) -> Chunk:
         """
         Convert database row dict to Chunk model.

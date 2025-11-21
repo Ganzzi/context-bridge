@@ -2,6 +2,8 @@
 Document management page for Context Bridge Streamlit app.
 """
 
+import asyncio
+import logging
 import streamlit as st
 import pandas as pd
 from typing import List, Optional
@@ -17,6 +19,9 @@ from utils.ui_helpers import (
     show_connection_status,
 )
 from utils.caching import CacheManager, cached_function
+from components.tag_selector import render_tag_selector_multiselect
+
+logger = logging.getLogger(__name__)
 
 st.title("📚 Document Management")
 
@@ -43,6 +48,21 @@ with tab1:
         name_filter = st.text_input("Filter by name", placeholder="Exact name")
     with col3:
         version_filter = st.text_input("Filter by version", placeholder="e.g., 1.0.0")
+
+    # Tag filtering
+    st.markdown("**Filter by Tags** (optional)")
+    try:
+        tags = asyncio.run(SessionState.get_bridge().list_tags())
+        selected_tag_ids = render_tag_selector_multiselect(
+            tags,
+            key="documents_page_tags",
+            placeholder="Select tags to filter documents...",
+            disabled=False,
+        )
+    except Exception as e:
+        logger.error(f"Failed to load tags: {e}")
+        selected_tag_ids = []
+        st.warning("Could not load tags for filtering")
 
     # Pagination controls
     col4, col5 = st.columns([1, 3])
@@ -98,51 +118,54 @@ with tab1:
             st.caption("📦 Loaded from cache")
 
         if documents:
-            # Convert to DataFrame for display
-            df_data = []
+            # Display documents as cards with tag information
             for doc in documents:
-                df_data.append(
-                    {
-                        "ID": doc.id,
-                        "Name": doc.name,
-                        "Version": doc.version,
-                        "Description": doc.description or "",
-                        "Source URL": doc.source_url or "",
-                        "Created": doc.created_at.strftime("%Y-%m-%d %H:%M"),
-                        "Updated": doc.updated_at.strftime("%Y-%m-%d %H:%M"),
-                    }
-                )
+                with st.container(border=True):
+                    col1, col2 = st.columns([3, 1])
 
-            df = pd.DataFrame(df_data)
+                    with col1:
+                        st.markdown(f"### {doc.name} (v{doc.version})")
+                        if doc.description:
+                            st.markdown(f"_{doc.description}_")
 
-            # Display DataFrame
-            st.dataframe(
-                df,
-                use_container_width=True,
-                column_config={
-                    "ID": st.column_config.NumberColumn("ID", width="small"),
-                    "Name": st.column_config.TextColumn("Name", width="medium"),
-                    "Version": st.column_config.TextColumn("Version", width="small"),
-                    "Description": st.column_config.TextColumn("Description", width="large"),
-                    "Source URL": st.column_config.LinkColumn("Source URL", width="medium"),
-                    "Created": st.column_config.DatetimeColumn("Created", width="medium"),
-                    "Updated": st.column_config.DatetimeColumn("Updated", width="medium"),
-                },
-            )
+                        # Display tags for this document
+                        try:
+                            doc_tags = asyncio.run(
+                                SessionState.get_bridge().get_document_tags(doc.id)
+                            )
+                            if doc_tags:
+                                from components.tag_selector import render_tag_badges
 
-            # Action buttons for each document
-            st.subheader("Actions")
-            cols = st.columns(min(len(documents), 4))
-            for i, doc in enumerate(documents):
-                with cols[i % 4]:
-                    if st.button(f"View {doc.name} v{doc.version}", key=f"view_{doc.id}"):
-                        st.session_state.selected_document = doc.id
-                        st.rerun()
+                                st.markdown("**Tags:**")
+                                render_tag_badges(doc_tags)
+                        except Exception as e:
+                            logger.debug(f"Could not load tags for document {doc.id}: {e}")
 
-                    if st.button(f"Delete {doc.name}", key=f"delete_{doc.id}", type="secondary"):
-                        # Show delete confirmation
-                        st.session_state[f"confirm_delete_{doc.id}"] = True
-                        st.rerun()
+                        # Additional metadata
+                        col_meta1, col_meta2, col_meta3 = st.columns(3)
+                        with col_meta1:
+                            st.caption(f"📄 Pages: {doc.total_pages}")
+                        with col_meta2:
+                            st.caption(f"📦 Chunks: {doc.total_chunks}")
+                        with col_meta3:
+                            st.caption(
+                                f"🔗 {doc.source_url[:30]}..." if doc.source_url else "No URL"
+                            )
+
+                    with col2:
+                        # Action buttons
+                        if st.button("👁️ View", key=f"view_{doc.id}", use_container_width=True):
+                            st.session_state.selected_document = doc.id
+                            st.rerun()
+
+                        if st.button(
+                            "🗑️ Delete",
+                            key=f"delete_{doc.id}",
+                            type="secondary",
+                            use_container_width=True,
+                        ):
+                            st.session_state[f"confirm_delete_{doc.id}"] = True
+                            st.rerun()
 
             # Handle delete confirmations
             for doc in documents:
@@ -155,12 +178,9 @@ with tab1:
                     with col_confirm:
                         if st.button("✅ Yes, Delete", key=f"confirm_yes_{doc.id}", type="primary"):
                             try:
-                                import asyncio
-
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                success = loop.run_until_complete(bridge.delete_document(doc.id))
-                                loop.close()
+                                success = asyncio.run(
+                                    SessionState.get_bridge().delete_document(doc.id)
+                                )
 
                                 if success:
                                     show_success(
