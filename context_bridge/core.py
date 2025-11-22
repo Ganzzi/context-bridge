@@ -26,7 +26,7 @@ from context_bridge.service.crawling_service import CrawlingService, CrawlConfig
 from context_bridge.service.chunking_service import ChunkingService
 from context_bridge.service.embedding import EmbeddingService
 from context_bridge.service.url_service import UrlService
-from context_bridge.services.reprocessing_service import ReprocessingService
+from context_bridge.service.reprocessing_service import ReprocessingService
 from context_bridge.database.repositories.document_repository import DocumentRepository, Document
 from context_bridge.database.repositories.chunk_repository import ChunkRepository
 from context_bridge.database.repositories.tag_repository import TagRepository

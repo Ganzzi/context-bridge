@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 from context_bridge.config import Config
 from context_bridge.database.models.group_models import Group, ProcessingStatus
-from context_bridge.services.reprocessing_service import ReprocessingService
+from context_bridge.service.reprocessing_service import ReprocessingService
 
 
 @pytest.fixture

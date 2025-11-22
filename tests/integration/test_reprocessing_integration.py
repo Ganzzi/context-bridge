@@ -14,7 +14,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from context_bridge.core import ContextBridge
-from context_bridge.services.reprocessing_service import ReprocessingService
+from context_bridge.service.reprocessing_service import ReprocessingService
 from context_bridge.database.models.group_models import Group, ProcessingStatus
 
 
