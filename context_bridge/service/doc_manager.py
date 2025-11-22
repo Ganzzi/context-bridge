@@ -23,7 +23,7 @@ from context_bridge.database.repositories.chunk_repository import ChunkRepositor
 from context_bridge.service.crawling_service import CrawlingService
 from context_bridge.service.chunking_service import ChunkingService
 from context_bridge.service.embedding import EmbeddingService
-from context_bridge.service.context_agent import ContextGenerationAgent
+from context_bridge.agents.context_generator import ContextGenerator
 
 logger = logging.getLogger(__name__)
 

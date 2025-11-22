@@ -53,12 +53,12 @@ class ReprocessingService:
 
         # Import here to avoid circular imports
         try:
-            from context_bridge.service.context_agent import ContextGenerationAgent
+            from context_bridge.agents.context_generator import ContextGenerator
 
-            self.context_agent = ContextGenerationAgent(config)
+            self.context_agent = ContextGenerator(config)
         except ImportError:
             self.context_agent = None
-            logger.warning("ContextGenerationAgent not available, context generation disabled")
+            logger.warning("ContextGenerator not available, context generation disabled")
 
     async def reprocess_group(
         self,

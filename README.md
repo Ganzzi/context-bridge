@@ -476,13 +476,6 @@ async def organize_documentation():
         print(f"\n{group['name']} ({group['processing_status']})")
         print(f"  Pages: {group['total_pages']}")
         print(f"  Chunks: {group['total_chunks']}")
-    
-    # Get detailed group information
-    group_info = await bridge.get_group_info(group_id=result.group_id)
-    print(f"\nGroup Details:")
-    print(f"  Created: {group_info['created_at']}")
-    print(f"  Context Enabled: {group_info['context_enabled']}")
-```
 
 **Key Features**:
 - ✅ Name and describe page groups

@@ -21,10 +21,10 @@ This document tracks the progress of the v2 cleanup implementation as outlined i
 | Phase 1: MCP Server Cleanup | ✅ Complete | 1h | 0.5h | 100% |
 | Phase 2: Core API Cleanup - Tags | ⏸️ Not Started | 1.5h | - | 0% |
 | Phase 3: Core API Cleanup - Groups | ⏸️ Not Started | 1.5h | - | 0% |
-| Phase 4: Context Agent Refactoring | ⏸️ Not Started | 1.5h | - | 0% |
+| Phase 4: Context Agent Refactoring | ✅ Complete | 1.5h | 1h | 100% |
 | Phase 5: Reprocessing Service | ⏸️ Not Started | 1h | - | 0% |
 | Phase 6: Testing & Validation | ⏸️ Not Started | 2.5h | - | 0% |
-| **Total** | **⏳ In Progress** | **9h** | **0.5h** | **17%** |
+| **Total** | **⏳ In Progress** | **9h** | **1.5h** | **33%** |
 
 ---
 
@@ -107,29 +107,43 @@ This document tracks the progress of the v2 cleanup implementation as outlined i
 
 ---
 
-## Phase 4: Context Agent Refactoring ⏸️
+## Phase 4: Context Agent Refactoring ✅ COMPLETE
 
 **Goal:** Move to agents/, fix Pydantic AI usage, ensure type safety
 
+**Completion Date:** November 22, 2025  
+**Time Taken:** 1 hour
+
 ### Tasks
-- [ ] Create agents directory (5 min)
-- [ ] Move and rename file (10 min)
-- [ ] Fix Pydantic AI usage (20 min)
-- [ ] Verify type safety (15 min)
-- [ ] Update imports (20 min)
-- [ ] Test context generation (20 min)
+- [x] Create agents directory (5 min)
+- [x] Move and rename file (10 min)
+- [x] Fix Pydantic AI usage (20 min)
+- [x] Verify type safety (15 min)
+- [x] Update imports (20 min)
+- [x] Test context generation (20 min)
 
 ### Files Modified
-- `context_bridge/agents/__init__.py` (new)
-- `context_bridge/agents/context_generator.py` (moved from service/)
+- `context_bridge/agents/__init__.py` (new) - 11 lines
+- `context_bridge/agents/context_generator.py` (moved from service/) - 218 lines
 - `context_bridge/service/doc_manager.py` (import update)
 - `context_bridge/services/reprocessing_service.py` (import update)
+- `tests/unit/test_context_agent.py` (18 tests updated and all passing)
 
 ### Changes Summary
-- File moved: `service/context_agent.py` → `agents/context_generator.py`
-- Fixed: `result_type` → `output_type`
-- Fixed: `result.data.context` → `result.output.context`
-- Type safety: No `dict`, `Dict[str, Any]`, or `Any` in signatures
+- ✅ File moved: `service/context_agent.py` → `agents/context_generator.py`
+- ✅ Class renamed: `ContextGenerationAgent` → `ContextGenerator`
+- ✅ Fixed: `result_type` → `output_type` (Pydantic AI API change)
+- ✅ Fixed: `result.data.context` → `result.output.context` (Pydantic AI API change)
+- ✅ Type safety: No `dict`, `Dict[str, Any]`, or `Any` in signatures
+- ✅ All imports updated: 4 files modified
+- ✅ All 18 unit tests passing (100%)
+- ✅ Code coverage: 94% on context_generator.py
+
+### Testing Results
+- ✅ `pytest tests/unit/test_context_agent.py`: 18 passed, 94% coverage
+- ✅ No Pydantic AI deprecation warnings
+- ✅ No type safety violations
+- ✅ All imports resolved and functional
 
 ---
 
@@ -195,11 +209,11 @@ This document tracks the progress of the v2 cleanup implementation as outlined i
 - [ ] Basic group listing works
 
 ### Context Agent
-- [ ] Located at: `context_bridge/agents/context_generator.py`
-- [ ] Uses `output_type=ChunkContext`
-- [ ] Uses `result.output.context`
-- [ ] No `dict`, `Dict[str, Any]`, or `Any` types
-- [ ] All imports updated
+- [x] Located at: `context_bridge/agents/context_generator.py`
+- [x] Uses `output_type=ChunkContext`
+- [x] Uses `result.output.context`
+- [x] No `dict`, `Dict[str, Any]`, or `Any` types
+- [x] All imports updated (4 files modified)
 
 ### Reprocessing Service
 - [ ] Located at: `context_bridge/service/reprocessing_service.py`
@@ -266,7 +280,6 @@ This document tracks the progress of the v2 cleanup implementation as outlined i
 
 ## Next Steps
 
-1. Review cleanup plan: `docs/plan/v2_cleanup_plan.md`
-2. Start Phase 1: MCP Server Cleanup
-3. Update this progress document after each phase
-4. Commit changes after each phase completion
+1. ✅ Phase 4 complete: Context Agent Refactoring
+2. Phase 5: Reprocessing Service Decision (move from services/ → service/)
+3. Phase 6: Testing & Validation

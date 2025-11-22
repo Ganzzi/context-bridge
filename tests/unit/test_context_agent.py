@@ -1,5 +1,5 @@
 """
-Unit tests for ContextGenerationAgent service.
+Unit tests for ContextGenerator service.
 
 Tests cover:
 - Agent initialization with various config options
@@ -17,8 +17,8 @@ from typing import Optional
 from pydantic import Field
 
 from context_bridge.config import Config
-from context_bridge.service.context_agent import (
-    ContextGenerationAgent,
+from context_bridge.agents.context_generator import (
+    ContextGenerator,
     ChunkContext,
     CONTEXT_GENERATION_SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
@@ -53,13 +53,13 @@ def mock_agent():
     return agent
 
 
-class TestContextGenerationAgentInit:
-    """Tests for ContextGenerationAgent initialization."""
+class TestContextGeneratorInit:
+    """Tests for ContextGenerator initialization."""
 
     def test_init_with_api_keys(self, mock_config):
         """Test initialization with API keys from config."""
-        with patch("context_bridge.service.context_agent.ModelProvider") as mock_provider_class:
-            agent = ContextGenerationAgent(mock_config)
+        with patch("context_bridge.agents.context_generator.ModelProvider") as mock_provider_class:
+            agent = ContextGenerator(mock_config)
 
             assert agent.config == mock_config
             assert agent._agent is None
@@ -74,8 +74,8 @@ class TestContextGenerationAgentInit:
             openai_api_key=None,
         )
 
-        with patch("context_bridge.service.context_agent.ModelProvider") as mock_provider_class:
-            agent = ContextGenerationAgent(config)
+        with patch("context_bridge.agents.context_generator.ModelProvider") as mock_provider_class:
+            agent = ContextGenerator(config)
 
             assert agent.config == config
             mock_provider_class.assert_called_once_with({})
@@ -88,26 +88,26 @@ class TestContextGenerationAgentInit:
             openai_api_key="test-openai-key",
         )
 
-        with patch("context_bridge.service.context_agent.ModelProvider") as mock_provider_class:
-            agent = ContextGenerationAgent(config)
+        with patch("context_bridge.agents.context_generator.ModelProvider") as mock_provider_class:
+            agent = ContextGenerator(config)
 
             mock_provider_class.assert_called_once_with({"openai": "test-openai-key"})
 
 
-class TestContextGenerationAgentCreateAgent:
+class TestContextGeneratorCreateAgent:
     """Tests for internal agent creation."""
 
     def test_create_agent_with_document_content(self, mock_config):
         """Test creating an agent with document content in system prompt."""
-        with patch("context_bridge.service.context_agent.ModelProvider") as mock_provider_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider") as mock_provider_class:
             mock_provider = MagicMock()
             mock_provider_class.return_value = mock_provider
 
             mock_model = MagicMock()
             mock_provider.get_model.return_value = mock_model
 
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
-                agent_instance = ContextGenerationAgent(mock_config)
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
+                agent_instance = ContextGenerator(mock_config)
                 document = "This is a test document about APIs."
 
                 result = agent_instance._create_agent(document)
@@ -123,15 +123,15 @@ class TestContextGenerationAgentCreateAgent:
 
                 assert call_kwargs["model"] == mock_model
                 assert "This is a test document about APIs." in call_kwargs["system_prompt"]
-                assert call_kwargs["result_type"] == ChunkContext
+                assert call_kwargs["output_type"] == ChunkContext
                 assert call_kwargs["model_settings"]["temperature"] == 0.3
                 assert call_kwargs["model_settings"]["max_tokens"] == 500
 
     def test_create_agent_formats_system_prompt(self, mock_config):
         """Test that system prompt correctly formats with document content."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
-                agent_instance = ContextGenerationAgent(mock_config)
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
+                agent_instance = ContextGenerator(mock_config)
                 doc_content = "Important API documentation"
 
                 agent_instance._create_agent(doc_content)
@@ -152,16 +152,16 @@ class TestContextGenerationSingleChunk:
     @pytest.mark.asyncio
     async def test_generate_context_success(self, mock_config):
         """Test successful context generation for a single chunk."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 # Mock the agent instance
                 mock_agent_instance = AsyncMock()
                 mock_result = MagicMock()
-                mock_result.data = ChunkContext(context="Generated context summary")
+                mock_result.output = ChunkContext(context="Generated context summary")
                 mock_agent_instance.run.return_value = mock_result
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 chunk = "This is a chunk about authentication."
                 document = "Complete API documentation about authentication and authorization."
 
@@ -176,15 +176,15 @@ class TestContextGenerationSingleChunk:
     @pytest.mark.asyncio
     async def test_generate_context_reuses_agent(self, mock_config):
         """Test that agent is reused for same document (prompt caching)."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
                 mock_result = MagicMock()
-                mock_result.data = ChunkContext(context="Test context")
+                mock_result.output = ChunkContext(context="Test context")
                 mock_agent_instance.run.return_value = mock_result
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 document = "Same document content"
                 chunk1 = "First chunk"
                 chunk2 = "Second chunk"
@@ -199,15 +199,15 @@ class TestContextGenerationSingleChunk:
     @pytest.mark.asyncio
     async def test_generate_context_creates_new_agent_for_different_document(self, mock_config):
         """Test that new agent is created when document changes."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
                 mock_result = MagicMock()
-                mock_result.data = ChunkContext(context="Test context")
+                mock_result.output = ChunkContext(context="Test context")
                 mock_agent_instance.run.return_value = mock_result
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
 
                 # Generate context for first document
                 await agent.generate_context("Chunk 1", "Document A")
@@ -220,13 +220,13 @@ class TestContextGenerationSingleChunk:
     @pytest.mark.asyncio
     async def test_generate_context_returns_empty_on_error(self, mock_config):
         """Test that empty string is returned on generation error."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
                 mock_agent_instance.run.side_effect = Exception("API Error")
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 result = await agent.generate_context("Chunk", "Document")
 
                 assert result == ""
@@ -234,15 +234,15 @@ class TestContextGenerationSingleChunk:
     @pytest.mark.asyncio
     async def test_generate_context_formats_user_prompt(self, mock_config):
         """Test that user prompt is correctly formatted with chunk content."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
                 mock_result = MagicMock()
-                mock_result.data = ChunkContext(context="Context")
+                mock_result.output = ChunkContext(context="Context")
                 mock_agent_instance.run.return_value = mock_result
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 chunk = "Authentication endpoint description"
                 document = "API docs"
 
@@ -260,17 +260,17 @@ class TestContextGenerationBatch:
     @pytest.mark.asyncio
     async def test_generate_contexts_batch_success(self, mock_config):
         """Test successful batch context generation."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
 
                 # Mock different results for each call
                 mock_result1 = MagicMock()
-                mock_result1.data = ChunkContext(context="Context 1")
+                mock_result1.output = ChunkContext(context="Context 1")
                 mock_result2 = MagicMock()
-                mock_result2.data = ChunkContext(context="Context 2")
+                mock_result2.output = ChunkContext(context="Context 2")
                 mock_result3 = MagicMock()
-                mock_result3.data = ChunkContext(context="Context 3")
+                mock_result3.output = ChunkContext(context="Context 3")
 
                 mock_agent_instance.run.side_effect = [
                     mock_result1,
@@ -279,7 +279,7 @@ class TestContextGenerationBatch:
                 ]
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 chunks = ["Chunk 1", "Chunk 2", "Chunk 3"]
                 document = "Test document"
 
@@ -293,19 +293,19 @@ class TestContextGenerationBatch:
     @pytest.mark.asyncio
     async def test_generate_contexts_batch_preserves_order(self, mock_config):
         """Test that batch results maintain order of input chunks."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
 
                 contexts = [ChunkContext(context=f"Context {i}") for i in range(5)]
                 mock_results = [MagicMock() for _ in contexts]
                 for mock_result, context in zip(mock_results, contexts):
-                    mock_result.data = context
+                    mock_result.output = context
 
                 mock_agent_instance.run.side_effect = mock_results
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 chunks = [f"Chunk {i}" for i in range(5)]
                 document = "Document"
 
@@ -316,15 +316,15 @@ class TestContextGenerationBatch:
     @pytest.mark.asyncio
     async def test_generate_contexts_batch_handles_partial_failures(self, mock_config):
         """Test batch processing continues with partial failures."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
 
                 # Mix of successes and failures
                 mock_result1 = MagicMock()
-                mock_result1.data = ChunkContext(context="Context 1")
+                mock_result1.output = ChunkContext(context="Context 1")
                 mock_result3 = MagicMock()
-                mock_result3.data = ChunkContext(context="Context 3")
+                mock_result3.output = ChunkContext(context="Context 3")
 
                 mock_agent_instance.run.side_effect = [
                     mock_result1,
@@ -333,7 +333,7 @@ class TestContextGenerationBatch:
                 ]
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 chunks = ["Chunk 1", "Chunk 2", "Chunk 3"]
                 document = "Document"
 
@@ -347,8 +347,8 @@ class TestContextGenerationBatch:
     @pytest.mark.asyncio
     async def test_generate_contexts_batch_empty_chunks(self, mock_config):
         """Test batch processing with empty chunk list."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            agent = ContextGenerationAgent(mock_config)
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            agent = ContextGenerator(mock_config)
             results = await agent.generate_contexts_batch([], "Document")
 
             assert results == []
@@ -356,18 +356,18 @@ class TestContextGenerationBatch:
     @pytest.mark.asyncio
     async def test_generate_contexts_batch_concurrent_processing(self, mock_config):
         """Test that batch processing happens concurrently."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
 
                 # Create mock results
                 mock_results = [
-                    MagicMock(data=ChunkContext(context=f"Context {i}")) for i in range(10)
+                    MagicMock(output=ChunkContext(context=f"Context {i}")) for i in range(10)
                 ]
                 mock_agent_instance.run.side_effect = mock_results
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 chunks = [f"Chunk {i}" for i in range(10)]
                 document = "Document"
 
@@ -384,15 +384,15 @@ class TestContextGenerationIntegration:
     @pytest.mark.asyncio
     async def test_full_workflow_with_caching(self, mock_config):
         """Test full workflow with agent reuse and caching."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
                 mock_result = MagicMock()
-                mock_result.data = ChunkContext(context="Generated context")
+                mock_result.output = ChunkContext(context="Generated context")
                 mock_agent_instance.run.return_value = mock_result
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 document = "Complete documentation"
 
                 # Generate context for multiple chunks
@@ -408,11 +408,11 @@ class TestContextGenerationIntegration:
     @pytest.mark.asyncio
     async def test_model_provider_integration(self, mock_config):
         """Test integration with ModelProvider for API key handling."""
-        with patch("context_bridge.service.context_agent.ModelProvider") as mock_provider_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider") as mock_provider_class:
             mock_provider = MagicMock()
             mock_provider_class.return_value = mock_provider
 
-            agent = ContextGenerationAgent(mock_config)
+            agent = ContextGenerator(mock_config)
 
             # Verify ModelProvider was initialized with correct API keys
             mock_provider_class.assert_called_once_with({"anthropic": "test-anthropic-key"})
@@ -420,20 +420,20 @@ class TestContextGenerationIntegration:
     @pytest.mark.asyncio
     async def test_error_recovery_maintains_functionality(self, mock_config):
         """Test that agent recovers from errors and continues functioning."""
-        with patch("context_bridge.service.context_agent.ModelProvider"):
-            with patch("context_bridge.service.context_agent.Agent") as mock_agent_class:
+        with patch("context_bridge.agents.context_generator.ModelProvider"):
+            with patch("context_bridge.agents.context_generator.Agent") as mock_agent_class:
                 mock_agent_instance = AsyncMock()
 
                 # First call fails, second succeeds
                 mock_result = MagicMock()
-                mock_result.data = ChunkContext(context="Success context")
+                mock_result.output = ChunkContext(context="Success context")
                 mock_agent_instance.run.side_effect = [
                     Exception("First error"),
                     mock_result,
                 ]
                 mock_agent_class.return_value = mock_agent_instance
 
-                agent = ContextGenerationAgent(mock_config)
+                agent = ContextGenerator(mock_config)
                 document = "Document"
 
                 # First call fails
