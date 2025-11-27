@@ -60,11 +60,11 @@ class TagRepository:
 
             row_data = row[0]
             return Tag(
-                id=row_data[0],
-                name=row_data[1],
-                category=TagCategory(row_data[2]),
-                description=row_data[3],
-                created_at=row_data[4],
+                id=row_data["id"],
+                name=row_data["name"],
+                category=TagCategory(row_data["category"]),
+                description=row_data["description"],
+                created_at=row_data["created_at"],
             )
 
     async def get_tag_by_id(self, tag_id: int) -> Optional[Tag]:
@@ -93,11 +93,11 @@ class TagRepository:
 
             row_data = row[0]
             return Tag(
-                id=row_data[0],
-                name=row_data[1],
-                category=TagCategory(row_data[2]),
-                description=row_data[3],
-                created_at=row_data[4],
+                id=row_data["id"],
+                name=row_data["name"],
+                category=TagCategory(row_data["category"]),
+                description=row_data["description"],
+                created_at=row_data["created_at"],
             )
 
     async def get_tag_by_name(self, name: str) -> Optional[Tag]:
@@ -126,11 +126,11 @@ class TagRepository:
 
             row_data = row[0]
             return Tag(
-                id=row_data[0],
-                name=row_data[1],
-                category=TagCategory(row_data[2]),
-                description=row_data[3],
-                created_at=row_data[4],
+                id=row_data["id"],
+                name=row_data["name"],
+                category=TagCategory(row_data["category"]),
+                description=row_data["description"],
+                created_at=row_data["created_at"],
             )
 
     async def list_tags(
@@ -169,11 +169,11 @@ class TagRepository:
             for row_data in result.result():
                 tags.append(
                     Tag(
-                        id=row_data[0],
-                        name=row_data[1],
-                        category=TagCategory(row_data[2]),
-                        description=row_data[3],
-                        created_at=row_data[4],
+                        id=row_data["id"],
+                        name=row_data["name"],
+                        category=TagCategory(row_data["category"]),
+                        description=row_data["description"],
+                        created_at=row_data["created_at"],
                     )
                 )
 
@@ -199,11 +199,11 @@ class TagRepository:
             for row_data in result.result():
                 tags.append(
                     Tag(
-                        id=row_data[0],
-                        name=row_data[1],
-                        category=TagCategory(row_data[2]),
-                        description=row_data[3],
-                        created_at=row_data[4],
+                        id=row_data["id"],
+                        name=row_data["name"],
+                        category=TagCategory(row_data["category"]),
+                        description=row_data["description"],
+                        created_at=row_data["created_at"],
                     )
                 )
 
@@ -239,11 +239,11 @@ class TagRepository:
 
             row_data = row[0]
             return Tag(
-                id=row_data[0],
-                name=row_data[1],
-                category=TagCategory(row_data[2]),
-                description=row_data[3],
-                created_at=row_data[4],
+                id=row_data["id"],
+                name=row_data["name"],
+                category=TagCategory(row_data["category"]),
+                description=row_data["description"],
+                created_at=row_data["created_at"],
             )
 
     async def delete_tag(self, tag_id: int) -> bool:
@@ -385,11 +385,11 @@ class TagRepository:
             for row_data in result.result():
                 tags.append(
                     Tag(
-                        id=row_data[0],
-                        name=row_data[1],
-                        category=TagCategory(row_data[2]),
-                        description=row_data[3],
-                        created_at=row_data[4],
+                        id=row_data["id"],
+                        name=row_data["name"],
+                        category=TagCategory(row_data["category"]),
+                        description=row_data["description"],
+                        created_at=row_data["created_at"],
                     )
                 )
 
@@ -421,7 +421,7 @@ class TagRepository:
                 [tag_id, limit, offset],
             )
 
-            return [row[0] for row in result.result()]
+            return [row["document_id"] for row in result.result()]
 
     async def get_documents_by_tags(
         self,
@@ -472,7 +472,7 @@ class TagRepository:
 
         async with self.db_manager.connection() as conn:
             result = await conn.execute(query, params)
-            return [row[0] for row in result.result()]
+            return [row["document_id"] for row in result.result()]
 
     async def get_tag_statistics(self) -> List[TagStatistics]:
         """
@@ -501,11 +501,11 @@ class TagRepository:
             for row_data in result.result():
                 stats.append(
                     TagStatistics(
-                        tag_id=row_data[0],
-                        name=row_data[1],
-                        category=TagCategory(row_data[2]),
-                        usage_count=row_data[3],
-                        created_at=row_data[4],
+                        tag_id=row_data["id"],
+                        name=row_data["name"],
+                        category=TagCategory(row_data["category"]),
+                        usage_count=row_data["usage_count"],
+                        created_at=row_data["created_at"],
                     )
                 )
 
@@ -543,11 +543,11 @@ class TagRepository:
             for row_data in result.result():
                 stats.append(
                     TagStatistics(
-                        tag_id=row_data[0],
-                        name=row_data[1],
-                        category=TagCategory(row_data[2]),
-                        usage_count=row_data[3],
-                        created_at=row_data[4],
+                        tag_id=row_data["id"],
+                        name=row_data["name"],
+                        category=TagCategory(row_data["category"]),
+                        usage_count=row_data["usage_count"],
+                        created_at=row_data["created_at"],
                     )
                 )
 
@@ -572,6 +572,6 @@ class TagRepository:
 
             counts = {}
             for row_data in result.result():
-                counts[row_data[0]] = row_data[1]
+                counts[row_data["category"]] = row_data["count"]
 
             return counts

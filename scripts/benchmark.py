@@ -148,7 +148,7 @@ class BenchmarkRunner:
             logger.info(f"Chunking {size_name} document ({len(content)} chars)")
 
             start_time = time.time()
-            chunks = await self.chunking_service.chunk_markdown(
+            chunks = await self.chunking_service.smart_chunk_markdown(
                 content, chunk_size=self.config.chunk_size
             )
             duration_ms = (time.time() - start_time) * 1000

@@ -6,11 +6,14 @@ Provides interface for viewing, creating, and managing tags.
 
 import logging
 import asyncio
+import nest_asyncio
+from streamlit_app.utils.async_utils import run_async
 
 import streamlit as st
 
 from context_bridge import ContextBridge
 from context_bridge.database.models.tag_models import TagCategory
+from streamlit_app.utils.session_state import SessionState
 from streamlit_app.components.tag_selector import (
     render_tag_badges,
     render_tag_statistics,
@@ -19,6 +22,9 @@ from streamlit_app.components.tag_selector import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Allow nested event loops for Streamlit
+nest_asyncio.apply()
 
 # Page configuration
 st.set_page_config(
@@ -34,7 +40,7 @@ st.markdown("View, create, and manage document tags for better organization and 
 async def load_tags():
     """Load all tags from database."""
     try:
-        bridge = ContextBridge.get_instance()
+        bridge = SessionState.get_bridge()
         tags = await bridge.list_tags()
         return tags
     except Exception as e:
@@ -46,7 +52,7 @@ async def load_tags():
 async def load_tag_statistics():
     """Load tag usage statistics."""
     try:
-        bridge = ContextBridge.get_instance()
+        bridge = SessionState.get_bridge()
         tags = await bridge.list_tags()
 
         # Get stats for each tag
@@ -64,7 +70,7 @@ async def load_tag_statistics():
 async def create_new_tag(name: str, category: TagCategory, description: str | None):
     """Create a new tag."""
     try:
-        bridge = ContextBridge.get_instance()
+        bridge = SessionState.get_bridge()
         tag = await bridge.create_tag(name, category, description)
         st.success(f"✅ Tag '{tag.name}' created successfully!")
         st.rerun()
@@ -87,8 +93,8 @@ with tab1:
     st.markdown("## Tag System Overview")
 
     # Load tags and statistics
-    tags = asyncio.run(load_tags())
-    tag_stats = asyncio.run(load_tag_statistics())
+    tags = run_async(load_tags())
+    tag_stats = run_async(load_tag_statistics())
 
     if tags:
         # Display statistics
@@ -145,7 +151,7 @@ with tab1:
 with tab2:
     st.markdown("## All Tags")
 
-    tags = asyncio.run(load_tags())
+    tags = run_async(load_tags())
 
     if tags:
         # Category filter
@@ -203,7 +209,7 @@ with tab3:
 
     if tag_data:
         # Create the tag
-        asyncio.run(create_new_tag(tag_data["name"], tag_data["category"], tag_data["description"]))
+        run_async(create_new_tag(tag_data["name"], tag_data["category"], tag_data["description"]))
 
     # Display predefined tags as reference
     st.markdown("### 📚 Reference: Predefined Tags")
@@ -212,16 +218,13 @@ with tab3:
 
     # Group by category
     tags_by_cat = {}
-    for tag_name, tag_info in PREDEFINED_TAGS.items():
-        cat = tag_info["category"]
-        if cat not in tags_by_cat:
-            tags_by_cat[cat] = []
-        tags_by_cat[cat].append((tag_name, tag_info["description"]))
+    for category, tag_list in PREDEFINED_TAGS.items():
+        tags_by_cat[category] = tag_list
 
     # Display categories
     for category in sorted(tags_by_cat.keys()):
         with st.expander(f"📁 {category.replace('_', ' ').title()}", expanded=False):
-            for tag_name, description in sorted(tags_by_cat[category]):
+           for tag_name, description in tags_by_cat[category]:
                 st.caption(f"**{tag_name}** — {description}")
 
 

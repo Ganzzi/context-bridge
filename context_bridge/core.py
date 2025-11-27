@@ -320,20 +320,23 @@ class ContextBridge:
                 if tag_match_all:
                     # All requested tags must be present
                     if all(tag_id in doc_tag_ids for tag_id in tags):
-                        doc.tags = doc_tag_ids
+                        # Store tag names instead of IDs for token efficiency
+                        doc.tags = [t.name for t in doc_tags]
                         tag_filtered_docs.append(doc)
                 else:
                     # At least one requested tag must be present
                     if any(tag_id in doc_tag_ids for tag_id in tags):
-                        doc.tags = doc_tag_ids
+                        # Store tag names instead of IDs for token efficiency
+                        doc.tags = [t.name for t in doc_tags]
                         tag_filtered_docs.append(doc)
 
             return tag_filtered_docs
         else:
-            # Populate tags for all documents
+            # Populate tags for all documents with tag names
             for doc in docs:
                 doc_tags = await self._tag_repository.get_document_tags(doc.id)
-                doc.tags = [t.id for t in doc_tags]
+                # Use tag names instead of IDs for better readability and token efficiency
+                doc.tags = [t.name for t in doc_tags]
 
             return docs
 
@@ -830,3 +833,33 @@ class ContextBridge:
         }
 
         return health
+    async def process_chunking(
+        self,
+        document_id: int,
+        page_ids: List[int],
+        chunk_size: Optional[int] = None,
+        batch_enabled: bool = True,
+        run_async: bool = True,
+    ) -> ChunkProcessingResult:
+        """
+        Process pages for chunking and embedding.
+        This creates a group and generates chunks for the specified pages.
+
+        Args:
+            document_id: Document ID
+            page_ids: List of page IDs to process
+            chunk_size: Optional chunk size override
+            batch_enabled: Whether to use batch processing
+            run_async: Whether to run in background
+
+        Returns:
+            ChunkProcessingResult with processing details
+        """
+        self._check_initialized()
+        return await self._doc_manager.process_chunking(
+            document_id=document_id,
+            page_ids=page_ids,
+            chunk_size=chunk_size,
+            batch_enabled=batch_enabled,
+            run_async=run_async,
+        )

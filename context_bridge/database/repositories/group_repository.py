@@ -89,10 +89,11 @@ class GroupRepository:
                 ],
             )
 
-            if not result:
+            rows = result.result()
+            if not rows:
                 raise Exception("Failed to create group")
 
-            row = result[0]
+            row = rows[0]
             logger.info(f"Created group {row['id']} for document {group_data.document_id}")
 
             return Group(
@@ -135,10 +136,11 @@ class GroupRepository:
                 [group_id],
             )
 
-            if not result:
+            rows = result.result()
+            if not rows:
                 return None
 
-            row = result[0]
+            row = rows[0]
             return Group(
                 id=row["id"],
                 document_id=row["document_id"],
@@ -212,7 +214,7 @@ class GroupRepository:
             results = await conn.fetch(query, params)
 
             groups = []
-            for row in results:
+            for row in results.result():
                 groups.append(
                     Group(
                         id=row["id"],
@@ -319,10 +321,11 @@ class GroupRepository:
         async with self.pool.connection() as conn:
             result = await conn.fetch(query, params)
 
-            if not result:
+            rows = result.result()
+            if not rows:
                 return None
 
-            row = result[0]
+            row = rows[0]
             logger.info(f"Updated group {group_id}")
 
             return Group(
@@ -360,7 +363,8 @@ class GroupRepository:
             result = await conn.execute("DELETE FROM groups WHERE id = $1", [group_id])
 
             # Check if any rows were deleted
-            deleted = result != "DELETE 0"
+            # execute returns QueryResult, result() returns string like "DELETE 1"
+            deleted = result.result() != "DELETE 0"
 
             if deleted:
                 logger.info(f"Deleted group {group_id}")
@@ -385,7 +389,7 @@ class GroupRepository:
             # Get group info
             group_result = await conn.fetch("SELECT id FROM groups WHERE id = $1", [group_id])
 
-            if not group_result:
+            if not group_result.result():
                 return None
 
             # Get page statistics
@@ -399,7 +403,8 @@ class GroupRepository:
                 [group_id],
             )
 
-            page_row = page_result[0] if page_result else {}
+            page_rows = page_result.result()
+            page_row = page_rows[0] if page_rows else {}
             total_pages = page_row.get("total_pages", 0) or 0
             total_content_bytes = page_row.get("total_content_bytes", 0) or 0
 
@@ -414,7 +419,8 @@ class GroupRepository:
                 [group_id],
             )
 
-            chunk_row = chunk_result[0] if chunk_result else {}
+            chunk_rows = chunk_result.result()
+            chunk_row = chunk_rows[0] if chunk_rows else {}
             total_chunks = chunk_row.get("total_chunks", 0) or 0
             avg_chunk_size = float(chunk_row.get("avg_chunk_size", 0) or 0)
 
@@ -423,7 +429,7 @@ class GroupRepository:
                 "SELECT id FROM pages WHERE group_id = $1 ORDER BY id", [group_id]
             )
 
-            page_ids = [row["id"] for row in page_ids_result]
+            page_ids = [row["id"] for row in page_ids_result.result()]
 
             # Calculate average page size
             avg_page_size = total_content_bytes / total_pages if total_pages > 0 else 0.0
@@ -455,7 +461,8 @@ class GroupRepository:
                 "SELECT COUNT(*) as count FROM groups WHERE document_id = $1", [document_id]
             )
 
-            return result[0]["count"] if result else 0
+            rows = result.result()
+            return rows[0]["count"] if rows else 0
 
     async def get_non_context_groups(
         self,
@@ -494,7 +501,7 @@ class GroupRepository:
             results = await conn.fetch(query, params)
 
             groups = []
-            for row in results:
+            for row in results.result():
                 groups.append(
                     Group(
                         id=row["id"],

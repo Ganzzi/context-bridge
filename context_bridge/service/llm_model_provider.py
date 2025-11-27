@@ -11,6 +11,7 @@ from typing import Dict, Optional
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.google import GoogleModel
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,16 @@ class ModelProvider:
     PROVIDER_MODEL_MAPPING = {
         "openai": OpenAIChatModel,
         "anthropic": AnthropicModel,
+        "google": GoogleModel,
+        "grok": OpenAIChatModel,  # Grok uses OpenAI-compatible API
     }
 
     # Environment variable names for API keys
     API_KEY_ENV_VARS = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "google": "GOOGLE_API_KEY",
+        "grok": "GROK_API_KEY",
     }
 
     def __init__(self, api_keys: Optional[Dict[str, str]] = None):

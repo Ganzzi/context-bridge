@@ -104,7 +104,7 @@ class TestReprocessingCoreAPI:
         )
         service.chunk_repo.delete_by_group = AsyncMock(return_value=5)
         service.chunk_repo.create_batch = AsyncMock(return_value=[10, 11])
-        service.chunking_service.chunk_markdown = AsyncMock(
+        service.chunking_service.smart_chunk_markdown = AsyncMock(
             return_value=[
                 {"index": 0, "content": "Chunk 1"},
                 {"index": 1, "content": "Chunk 2"},
@@ -264,7 +264,7 @@ class TestReprocessingCoreAPI:
         )
         service.chunk_repo.delete_by_group = AsyncMock(return_value=5)
         service.chunk_repo.create_batch = AsyncMock(return_value=[10])
-        service.chunking_service.chunk_markdown = AsyncMock(
+        service.chunking_service.smart_chunk_markdown = AsyncMock(
             return_value=[
                 {"index": 0, "content": "Chunk 1"},
             ]

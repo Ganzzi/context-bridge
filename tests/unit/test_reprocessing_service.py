@@ -42,7 +42,7 @@ def mock_db_manager():
 def mock_chunking_service():
     """Create mock chunking service."""
     service = AsyncMock()
-    service.chunk_markdown = AsyncMock()
+    service.smart_chunk_markdown = AsyncMock()
     return service
 
 
@@ -146,22 +146,22 @@ class TestReprocessGroupBasic:
             metadata={},
         )
 
-        reprocessing_service.group_repo.get_group_by_id.return_value = group
+        reprocessing_service.group_repo.get_group_by_id = AsyncMock(return_value=group)
         reprocessing_service.group_repo.update_group = AsyncMock()
 
         # Mock pages
         mock_page = MagicMock()
         mock_page.title = "Page 1"
         mock_page.content = "Page content"
-        reprocessing_service.page_repo.get_pages_for_group.return_value = [mock_page]
+        reprocessing_service.page_repo.get_pages_for_group = AsyncMock(return_value=[mock_page])
 
         # Mock chunks
         mock_chunk = MagicMock()
         mock_chunk.content = "Chunk content"
-        reprocessing_service.chunking_service.chunk_markdown.return_value = [mock_chunk]
+        reprocessing_service.chunking_service.chunk_markdown = AsyncMock(return_value=[mock_chunk])
 
         # Mock embeddings
-        reprocessing_service.embedding_service.embed_batch.return_value = [[0.1] * 768]
+        reprocessing_service.embedding_service.embed_batch = AsyncMock(return_value=[[0.1] * 768])
 
         # Mock chunk storage
         reprocessing_service.chunk_repo.create_chunk = AsyncMock()
@@ -245,7 +245,7 @@ class TestReprocessGroupBasic:
 
         mock_chunk = MagicMock()
         mock_chunk.content = "Chunk"
-        reprocessing_service.chunking_service.chunk_markdown.return_value = [mock_chunk]
+        reprocessing_service.chunking_service.smart_chunk_markdown.return_value = [mock_chunk]
 
         reprocessing_service.embedding_service.embed_batch.return_value = [[0.1] * 768]
         reprocessing_service.chunk_repo.create_chunk = AsyncMock()
@@ -305,7 +305,7 @@ class TestReprocessGroupWithContext:
 
         # Mock chunks
         chunks = [MagicMock(content="Chunk 1"), MagicMock(content="Chunk 2")]
-        reprocessing_service.chunking_service.chunk_markdown.return_value = chunks
+        reprocessing_service.chunking_service.smart_chunk_markdown.return_value = chunks
 
         reprocessing_service.embedding_service.embed_batch.return_value = [
             [0.1] * 768,
@@ -369,7 +369,7 @@ class TestReprocessMultipleGroups:
         # Mock chunks
         mock_chunk = MagicMock()
         mock_chunk.content = "Chunk"
-        reprocessing_service.chunking_service.chunk_markdown.return_value = [mock_chunk]
+        reprocessing_service.chunking_service.smart_chunk_markdown.return_value = [mock_chunk]
 
         reprocessing_service.embedding_service.embed_batch.return_value = [[0.1] * 768]
         reprocessing_service.chunk_repo.create_chunk = AsyncMock()
@@ -430,7 +430,7 @@ class TestReprocessMultipleGroups:
         # Mock chunks
         mock_chunk = MagicMock()
         mock_chunk.content = "Chunk"
-        reprocessing_service.chunking_service.chunk_markdown.return_value = [mock_chunk]
+        reprocessing_service.chunking_service.smart_chunk_markdown.return_value = [mock_chunk]
 
         reprocessing_service.embedding_service.embed_batch.return_value = [[0.1] * 768]
         reprocessing_service.chunk_repo.create_chunk = AsyncMock()
@@ -576,7 +576,7 @@ class TestErrorHandling:
         # Mock chunks
         mock_chunk = MagicMock()
         mock_chunk.content = "Chunk"
-        reprocessing_service.chunking_service.chunk_markdown.return_value = [mock_chunk]
+        reprocessing_service.chunking_service.smart_chunk_markdown.return_value = [mock_chunk]
 
         reprocessing_service.embedding_service.embed_batch.return_value = [[0.1] * 768]
         reprocessing_service.chunk_repo.create_chunk = AsyncMock()
@@ -628,7 +628,7 @@ class TestErrorHandling:
         # Mock chunks
         mock_chunk = MagicMock()
         mock_chunk.content = "Chunk"
-        reprocessing_service.chunking_service.chunk_markdown.return_value = [mock_chunk]
+        reprocessing_service.chunking_service.smart_chunk_markdown.return_value = [mock_chunk]
 
         reprocessing_service.embedding_service.embed_batch.return_value = [[0.1] * 768]
         reprocessing_service.chunk_repo.create_chunk = AsyncMock()

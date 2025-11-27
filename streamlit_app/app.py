@@ -5,6 +5,7 @@ Main entry point for the Streamlit web interface.
 """
 
 import streamlit as st
+# Force reload v2
 from utils.session_state import SessionState
 from utils.ui_helpers import apply_custom_css
 
@@ -20,7 +21,7 @@ st.sidebar.title("🌉 Context Bridge")
 st.sidebar.markdown("---")
 page = st.sidebar.radio(
     "Navigate",
-    ["🏠 Home", "📚 Documents", "📄 Crawled Pages", "🔍 Search"],
+    ["🏠 Home", "📚 Documents", "📄 Crawled Pages", "👥 Groups", "🔍 Search"],
     index=0,
     label_visibility="collapsed",
 )
@@ -30,6 +31,7 @@ page_map = {
     "🏠 Home": "Home",
     "📚 Documents": "Documents",
     "📄 Crawled Pages": "Pages",
+    "👥 Groups": "Groups",
     "🔍 Search": "Search",
 }
 
@@ -62,5 +64,7 @@ elif page_value == "Documents":
     from pages.documents import *
 elif page_value == "Pages":
     from pages.crawled_pages import *
+elif page_value == "Groups":
+    from pages.groups import *
 elif page_value == "Search":
     from pages.search import *

@@ -169,6 +169,14 @@ class Config(BaseModel):
         default_factory=lambda: os.getenv("OPENAI_API_KEY"),
         description="OpenAI API key for GPT models",
     )
+    google_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("GOOGLE_API_KEY"),
+        description="Google API key for Gemini models",
+    )
+    grok_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("GROK_API_KEY"),
+        description="Grok API key for Grok models",
+    )
 
     model_config = ConfigDict(
         env_file=".env",  # Optional .env loading - only loaded if file exists

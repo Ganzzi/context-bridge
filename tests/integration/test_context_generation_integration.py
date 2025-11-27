@@ -109,7 +109,7 @@ class TestProcessGroupWithContext:
         mock_page1.content = "# Page 1\n\nContent here"
 
         doc_manager.page_repo.get_pages_for_group.return_value = [mock_page1]
-        doc_manager.chunking_service.chunk_markdown.return_value = ["Chunk 1", "Chunk 2"]
+        doc_manager.chunking_service.smart_chunk_markdown.return_value = ["Chunk 1", "Chunk 2"]
         doc_manager.embedding_service.get_embeddings_batch.return_value = [
             [0.1, 0.2],
             [0.3, 0.4],
@@ -136,7 +136,7 @@ class TestProcessGroupWithContext:
         mock_page1.content = "# API Documentation\n\nAuthentication section"
 
         doc_manager.page_repo.get_pages_for_group.return_value = [mock_page1]
-        doc_manager.chunking_service.chunk_markdown.return_value = [
+        doc_manager.chunking_service.smart_chunk_markdown.return_value = [
             "Chunk 1 about auth",
             "Chunk 2 about tokens",
         ]
@@ -186,7 +186,7 @@ class TestProcessGroupWithContext:
         mock_page.content = "Test content"
 
         doc_manager.page_repo.get_pages_for_group.return_value = [mock_page]
-        doc_manager.chunking_service.chunk_markdown.return_value = [
+        doc_manager.chunking_service.smart_chunk_markdown.return_value = [
             "Chunk 1",
             "Chunk 2",
             "Chunk 3",
@@ -245,7 +245,7 @@ class TestProcessGroupWithContext:
         mock_page2.content = "# Section 2\n\nSecond section content"
 
         doc_manager.page_repo.get_pages_for_group.return_value = [mock_page1, mock_page2]
-        doc_manager.chunking_service.chunk_markdown.return_value = ["Chunk"]
+        doc_manager.chunking_service.smart_chunk_markdown.return_value = ["Chunk"]
         doc_manager.embedding_service.get_embeddings_batch.return_value = [[0.1]]
         doc_manager.chunk_repo.create_batch.return_value = [1]
         doc_manager.chunk_repo.prepend_context_to_chunk.return_value = True
@@ -294,7 +294,7 @@ class TestProcessGroupWithContext:
         mock_page.content = "Content"
 
         doc_manager.page_repo.get_pages_for_group.return_value = [mock_page]
-        doc_manager.chunking_service.chunk_markdown.return_value = ["Chunk"]
+        doc_manager.chunking_service.smart_chunk_markdown.return_value = ["Chunk"]
         doc_manager.embedding_service.get_embeddings_batch.return_value = [[0.1]]
         doc_manager.chunk_repo.create_batch.return_value = [1]
 
@@ -397,7 +397,7 @@ class TestContextGenerationIntegration:
         mock_page.content = "# Complete Documentation\n\n## Introduction\n\nAPI documentation"
 
         doc_manager.page_repo.get_pages_for_group.return_value = [mock_page]
-        doc_manager.chunking_service.chunk_markdown.return_value = [
+        doc_manager.chunking_service.smart_chunk_markdown.return_value = [
             "Introduction section",
             "API Reference section",
         ]

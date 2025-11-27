@@ -56,7 +56,7 @@ class TestErrorRecovery:
         with patch("context_bridge.service.doc_manager.ChunkingService") as mock_chunking:
             mock_chunking_instance = AsyncMock()
             mock_chunking.return_value = mock_chunking_instance
-            mock_chunking_instance.chunk_markdown = AsyncMock(
+            mock_chunking_instance.smart_chunk_markdown = AsyncMock(
                 side_effect=Exception("Chunking failed")
             )
 

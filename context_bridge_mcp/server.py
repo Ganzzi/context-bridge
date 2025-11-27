@@ -130,26 +130,23 @@ async def _handle_find_documents(
         # Get documents
         documents = await bridge.find_documents(query=query, limit=limit)
 
-        # Format response
+        # Format response - optimized for token efficiency
         if not documents:
             response = {
                 "documents": [],
                 "count": 0,
-                "message": "No documents found matching the criteria",
             }
         else:
+            # Compact format to reduce token usage
             response = {
                 "documents": [
                     {
                         "id": doc.id,
                         "name": doc.name,
                         "version": doc.version,
-                        "description": doc.description,
+                        "description": doc.description or "",
                         "source_url": doc.source_url or "",
-                        "tags": doc.tags,  # List of tag IDs associated with this document
-                        "total_pages": 0,  # TODO: Get actual page count
-                        "total_chunks": 0,  # TODO: Get actual chunk count
-                        "created_at": doc.created_at.isoformat(),
+                        "tags": doc.tags,  # List of tag names (not IDs) for readability
                     }
                     for doc in documents
                 ],
@@ -160,7 +157,7 @@ async def _handle_find_documents(
     except Exception as e:
         logger.error(f"Error executing find_documents: {e}", exc_info=True)
         error_response = {
-            "error": f"Error executing find_documents: {str(e)}",
+            "error": str(e),
             "documents": [],
             "count": 0,
         }
@@ -227,4 +224,4 @@ async def _handle_search_content(
             "results": [],
             "count": 0,
         }
-        return [types.TextContent(type="text", text=json.dumps(response, indent=2))]
+        return [types.TextContent(type="text", text=json.dumps(error_response, indent=2))]

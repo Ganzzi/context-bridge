@@ -544,7 +544,7 @@ class DocManager:
             # Initialize context agent if needed
             context_agent = None
             if context_enabled and context_model:
-                context_agent = ContextGenerationAgent(self.config)
+                context_agent = ContextGenerator(self.config)
                 logger.info(f"🤖 Initialized context agent with model {context_model}")
 
             # Process each page
@@ -555,7 +555,7 @@ class DocManager:
             for page in pages:
                 try:
                     # Extract chunks from page content
-                    chunks = self.chunking_service.chunk_markdown(page.content)
+                    chunks = self.chunking_service.smart_chunk_markdown(page.content)
                     logger.debug(f"📦 Generated {len(chunks)} chunks from page {page.id}")
 
                     if not chunks:

@@ -80,6 +80,10 @@ class ContextGenerator:
             api_keys["anthropic"] = config.anthropic_api_key
         if config.openai_api_key:
             api_keys["openai"] = config.openai_api_key
+        if config.google_api_key:
+            api_keys["google"] = config.google_api_key
+        if config.grok_api_key:
+            api_keys["grok"] = config.grok_api_key
 
         self.model_provider = ModelProvider(api_keys)
 

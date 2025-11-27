@@ -25,6 +25,7 @@ def mock_config():
     config.crawl_max_concurrent = 10
     config.chunk_size = 2000
     config.embedding = MagicMock()
+    config.context_agent_model = "anthropic:claude-3-5-sonnet-20241022"
     return config
 
 
@@ -318,7 +319,12 @@ class TestContextBridge:
         # Verify
         assert response == result
         mock_doc_manager.process_chunking.assert_called_once_with(
-            document_id=1, page_ids=[1, 2, 3, 4, 5], chunk_size=1500, run_async=True
+            document_id=1,
+            page_ids=[1, 2, 3, 4, 5],
+            chunk_size=1500,
+            context_enabled=False,
+            context_model="anthropic:claude-3-5-sonnet-20241022",
+            run_async=True,
         )
 
     @pytest.mark.asyncio

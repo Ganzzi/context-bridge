@@ -9,6 +9,7 @@ import pandas as pd
 from typing import List, Optional
 from context_bridge.database.repositories.document_repository import DocumentRepository, Document
 from utils.session_state import SessionState
+from utils.async_utils import run_async
 from utils.ui_helpers import (
     show_error,
     show_success,
@@ -52,7 +53,7 @@ with tab1:
     # Tag filtering
     st.markdown("**Filter by Tags** (optional)")
     try:
-        tags = asyncio.run(SessionState.get_bridge().list_tags())
+        tags = run_async(SessionState.get_bridge().list_tags())
         selected_tag_ids = render_tag_selector_multiselect(
             tags,
             key="documents_page_tags",
@@ -71,8 +72,127 @@ with tab1:
     with col5:
         page = st.number_input("Page", min_value=1, value=1, step=1)
 
-    # Fetch documents
+    # Handle search state
     if st.button("🔍 Search", type="primary"):
+        st.session_state.search_performed = True
+        # Reset pagination when searching
+        page = 1
+        
+    # Document Detail View - Check this FIRST
+    if st.session_state.get("selected_document"):
+        doc_id = st.session_state.selected_document
+        
+        # Back button
+        if st.button("← Back to Documents", key="back_to_docs"):
+            del st.session_state.selected_document
+            st.rerun()
+            
+        try:
+            # Load document details
+            repo = DocumentRepository(bridge._db_manager)
+            doc = run_async(repo.get_by_id(doc_id))
+            
+            if doc:
+                st.header(f"{doc.name} v{doc.version}")
+                
+                # Metadata columns
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.metric("Created", doc.created_at.strftime("%Y-%m-%d") if doc.created_at else "N/A")
+                with m2:
+                    st.metric("Status", "Active") # Placeholder for status if needed
+                with m3:
+                    st.empty()
+                with m4:
+                    st.empty()
+                
+                if doc.description:
+                    st.info(doc.description)
+                    
+                st.markdown(f"**Source URL:** [{doc.source_url}]({doc.source_url})" if doc.source_url else "**Source URL:** N/A")
+                
+                st.divider()
+                
+                # Tag Management Section
+                st.subheader("🏷️ Tags")
+                
+                # Load current tags
+                current_tags = run_async(bridge.get_document_tags(doc.id))
+                
+                # Display current tags with remove buttons
+                if current_tags:
+                    st.write("Current Tags:")
+                    # Use columns for a grid-like layout
+                    cols = st.columns(4)
+                    for i, tag in enumerate(current_tags):
+                        with cols[i % 4]:
+                            # Container for tag + delete button
+                            with st.container(border=True):
+                                st.caption(f"**{tag.name}**")
+                                if st.button("🗑️", key=f"rm_tag_{tag.id}", help=f"Remove {tag.name}"):
+                                    # Remove tag action
+                                    async def remove_tag_action():
+                                        from context_bridge.database.repositories.tag_repository import TagRepository
+                                        async with bridge._db_manager.connection() as conn:
+                                            tag_repo = TagRepository(bridge._db_manager) # TagRepo takes db_manager
+                                            return await tag_repo.remove_tag_from_document(doc.id, tag.id)
+                                    
+                                    if run_async(remove_tag_action()):
+                                        st.success(f"Removed tag '{tag.name}'")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to remove tag")
+                else:
+                    st.info("No tags assigned to this document.")
+                
+                st.divider()
+                
+                # Add new tags
+                st.subheader("Add Tags")
+                
+                all_tags = run_async(bridge.list_tags())
+                current_tag_ids = [t.id for t in current_tags]
+                available_tags = [t for t in all_tags if t.id not in current_tag_ids]
+                
+                if available_tags:
+                    tag_options = {t.name: t.id for t in available_tags}
+                    selected_tags_to_add = st.multiselect(
+                        "Select tags to add",
+                        options=list(tag_options.keys()),
+                        key="add_tags_multiselect"
+                    )
+                    
+                    if selected_tags_to_add:
+                        if st.button("Add Selected Tags", type="primary"):
+                            tags_to_add_ids = [tag_options[name] for name in selected_tags_to_add]
+                            
+                            async def add_tags_action():
+                                from context_bridge.database.repositories.tag_repository import TagRepository
+                                async with bridge._db_manager.connection() as conn:
+                                    tag_repo = TagRepository(bridge._db_manager)
+                                    return await tag_repo.add_tags_to_document(doc.id, tags_to_add_ids)
+                            
+                            added_count = run_async(add_tags_action())
+                            if added_count > 0:
+                                st.success(f"Added {added_count} tags!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to add tags.")
+                else:
+                    st.caption("All available tags are already assigned.")
+                    
+            else:
+                st.error("Document not found.")
+                if st.button("Go Back"):
+                    del st.session_state.selected_document
+                    st.rerun()
+                    
+        except Exception as e:
+            st.error(f"Error loading document details: {e}")
+            logger.error(f"Error detail view: {e}")
+
+    # List View (only if no document selected)
+    elif st.session_state.get("search_performed", False):
         # Generate cache key
         cache_key = CacheManager.get_cache_key(
             "documents",
@@ -88,13 +208,8 @@ with tab1:
         if documents is None:
             try:
                 with st.spinner("Loading documents..."):
-                    import asyncio
-
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
                     offset = (page - 1) * page_size
-                    documents = loop.run_until_complete(
+                    documents = run_async(
                         bridge.find_documents(
                             name=name_filter if name_filter else None,
                             version=version_filter if version_filter else None,
@@ -102,7 +217,6 @@ with tab1:
                             limit=page_size,
                         )
                     )
-                    loop.close()
 
                     # Cache the results for 5 minutes
                     CacheManager.set(cache_key, documents, ttl_seconds=300)
@@ -130,7 +244,7 @@ with tab1:
 
                         # Display tags for this document
                         try:
-                            doc_tags = asyncio.run(
+                            doc_tags = run_async(
                                 SessionState.get_bridge().get_document_tags(doc.id)
                             )
                             if doc_tags:
@@ -142,15 +256,13 @@ with tab1:
                             logger.debug(f"Could not load tags for document {doc.id}: {e}")
 
                         # Additional metadata
-                        col_meta1, col_meta2, col_meta3 = st.columns(3)
+                        col_meta1, col_meta2 = st.columns(2)
                         with col_meta1:
-                            st.caption(f"📄 Pages: {doc.total_pages}")
-                        with col_meta2:
-                            st.caption(f"📦 Chunks: {doc.total_chunks}")
-                        with col_meta3:
                             st.caption(
                                 f"🔗 {doc.source_url[:30]}..." if doc.source_url else "No URL"
                             )
+                        with col_meta2:
+                             st.caption(f"Created: {doc.created_at.strftime('%Y-%m-%d')}")
 
                     with col2:
                         # Action buttons
@@ -178,7 +290,7 @@ with tab1:
                     with col_confirm:
                         if st.button("✅ Yes, Delete", key=f"confirm_yes_{doc.id}", type="primary"):
                             try:
-                                success = asyncio.run(
+                                success = run_async(
                                     SessionState.get_bridge().delete_document(doc.id)
                                 )
 
@@ -208,116 +320,7 @@ with tab1:
         else:
             show_info("No documents found matching your criteria.")
 
-    else:
-        show_info("Click 'Search' to load documents.")
 
-    # Document Detail View
-    if st.session_state.get("selected_document"):
-        doc_id = st.session_state.selected_document
-
-        st.divider()
-        st.subheader("📄 Document Details")
-
-        try:
-            import asyncio
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            # Get document details
-            doc_repo = DocumentRepository(bridge._db_manager)
-            document = loop.run_until_complete(doc_repo.get_by_id(doc_id))
-
-            if document:
-                # Document metadata
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    st.markdown(f"**Name:** {document.name}")
-                    st.markdown(f"**Version:** {document.version}")
-                    if document.description:
-                        st.markdown(f"**Description:** {document.description}")
-                    if document.source_url:
-                        st.markdown(
-                            f"**Source URL:** [{document.source_url}]({document.source_url})"
-                        )
-
-                with col2:
-                    st.markdown(f"**Created:** {document.created_at.strftime('%Y-%m-%d %H:%M')}")
-                    st.markdown(f"**Updated:** {document.updated_at.strftime('%Y-%m-%d %H:%M')}")
-                    st.markdown(f"**Document ID:** {document.id}")
-
-                # Quick actions
-                st.subheader("Quick Actions")
-                action_col1, action_col2, action_col3, action_col4 = st.columns(4)
-
-                with action_col1:
-                    if st.button("📄 View Pages", key=f"view_pages_{doc_id}"):
-                        st.switch_page("pages/crawled_pages.py")
-
-                with action_col2:
-                    if st.button("🔍 Search Content", key=f"search_{doc_id}"):
-                        st.switch_page("pages/search.py")
-
-                with action_col3:
-                    if st.button(
-                        "🗑️ Delete Document", key=f"delete_detail_{doc_id}", type="secondary"
-                    ):
-                        st.session_state[f"confirm_delete_detail_{doc_id}"] = True
-                        st.rerun()
-
-                with action_col4:
-                    if st.button("❌ Close Details", key=f"close_detail_{doc_id}"):
-                        del st.session_state.selected_document
-                        st.rerun()
-
-                # Delete confirmation for detail view
-                if st.session_state.get(f"confirm_delete_detail_{doc_id}", False):
-                    st.warning(
-                        f"Are you sure you want to delete '{document.name} v{document.version}'? This will permanently remove the document and all associated pages and chunks."
-                    )
-
-                    col_confirm, col_cancel = st.columns(2)
-                    with col_confirm:
-                        if st.button(
-                            "✅ Yes, Delete", key=f"confirm_detail_yes_{doc_id}", type="primary"
-                        ):
-                            try:
-                                success = loop.run_until_complete(bridge.delete_document(doc_id))
-                                if success:
-                                    st.success(
-                                        f"Document '{document.name} v{document.version}' deleted successfully!"
-                                    )
-                                    del st.session_state.selected_document
-                                    del st.session_state[f"confirm_delete_detail_{doc_id}"]
-                                    st.session_state.documents_loaded = False
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to delete document.")
-                            except Exception as e:
-                                st.error(f"Error deleting document: {str(e)}")
-
-                    with col_cancel:
-                        if st.button("❌ Cancel", key=f"confirm_detail_no_{doc_id}"):
-                            del st.session_state[f"confirm_delete_detail_{doc_id}"]
-                            st.rerun()
-
-                # TODO: Add page/chunk counts and recent pages list
-                # For now, we'll show placeholder
-                st.info("Page and chunk statistics will be displayed here in a future update.")
-
-            else:
-                st.error("Document not found.")
-                if st.button("Clear Selection"):
-                    del st.session_state.selected_document
-                    st.rerun()
-
-            loop.close()
-
-        except Exception as e:
-            st.error(f"Error loading document details: {str(e)}")
-            if st.button("Clear Selection"):
-                del st.session_state.selected_document
-                st.rerun()
 
 with tab2:
     # Crawl form

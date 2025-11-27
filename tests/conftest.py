@@ -64,6 +64,9 @@ def mock_config() -> MagicMock:
     config.chunk_size = 2000
     config.min_combined_content_size = 100
     config.max_combined_content_size = 50000
+    config.context_agent_model = "anthropic:claude-3-5-sonnet-20241022"
+    config.anthropic_api_key = None
+    config.openai_api_key = None
     return config
 
 
@@ -72,11 +75,19 @@ def mock_config() -> MagicMock:
 
 @pytest.fixture
 def mock_db_manager() -> AsyncMock:
-    """Create a mock database manager."""
+    """Create a mock database manager with proper async context manager support."""
     manager = AsyncMock(spec=PostgreSQLManager)
     manager.initialize = AsyncMock()
     manager.close = AsyncMock()
-    manager.connection = AsyncMock()
+
+    # Create a mock connection that supports async context manager protocol
+    mock_conn = AsyncMock()
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=None)
+
+    # Make connection() return the async context manager
+    manager.connection = MagicMock(return_value=mock_conn)
+
     return manager
 
 
@@ -251,6 +262,8 @@ def sample_document() -> Document:
     """Create a sample document."""
     return Document(
         id=1,
+        name="test-doc",
+        version="1.0",
         url="https://example.com",
         title="Test Document",
         content="This is test content.",

@@ -172,6 +172,32 @@ def render_crawl_form(bridge: ContextBridge):
                             show_info(
                                 f"Document '{result.document_name} v{result.document_version}' has been added to your library."
                             )
+                        
+                        # Automatically trigger chunking to create initial group
+                        if result.pages_stored > 0:
+                            status_text.text("⚙️ Processing pages and creating group...")
+                            
+                            # Get all pages for the document
+                            pages = loop.run_until_complete(
+                                bridge.list_pages(result.document_id, limit=1000)
+                            )
+                            page_ids = [p.id for p in pages]
+                            
+                            if page_ids:
+                                # Trigger chunking
+                                chunk_result = loop.run_until_complete(
+                                    bridge.process_chunking(
+                                        document_id=result.document_id,
+                                        page_ids=page_ids,
+                                        run_async=False # Run synchronously to ensure group is created before user navigates
+                                    )
+                                )
+                                status_text.text("✅ Processing complete! Group created.")
+                                show_success(f"Processed {chunk_result.pages_processed} pages into chunks.")
+                            else:
+                                status_text.text("⚠️ No pages to process.")
+                        else:
+                            status_text.text("⚠️ No pages stored, skipping processing.")
 
                     finally:
                         loop.close()
