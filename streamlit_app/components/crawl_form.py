@@ -172,28 +172,30 @@ def render_crawl_form(bridge: ContextBridge):
                             show_info(
                                 f"Document '{result.document_name} v{result.document_version}' has been added to your library."
                             )
-                        
+
                         # Automatically trigger chunking to create initial group
                         if result.pages_stored > 0:
                             status_text.text("⚙️ Processing pages and creating group...")
-                            
+
                             # Get all pages for the document
                             pages = loop.run_until_complete(
                                 bridge.list_pages(result.document_id, limit=1000)
                             )
                             page_ids = [p.id for p in pages]
-                            
+
                             if page_ids:
-                                # Trigger chunking
-                                chunk_result = loop.run_until_complete(
-                                    bridge.process_chunking(
+                                # Create group for the pages (automatically handles chunking and embedding)
+                                group_result = loop.run_until_complete(
+                                    bridge.create_group(
                                         document_id=result.document_id,
                                         page_ids=page_ids,
-                                        run_async=False # Run synchronously to ensure group is created before user navigates
+                                        name=f"{result.document_name} v{result.document_version}",
                                     )
                                 )
                                 status_text.text("✅ Processing complete! Group created.")
-                                show_success(f"Processed {chunk_result.pages_processed} pages into chunks.")
+                                show_success(
+                                    f"Created group with {len(page_ids)} pages for processing."
+                                )
                             else:
                                 status_text.text("⚠️ No pages to process.")
                         else:

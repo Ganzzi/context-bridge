@@ -361,14 +361,13 @@ if selected_doc_id:
                                     progress_updates = st.empty()
 
                                 result = loop.run_until_complete(
-                                    bridge.process_pages(
+                                    bridge.create_group(
                                         document_id=selected_doc_id,
                                         page_ids=st.session_state.selected_pages,
                                         chunk_size=chunk_size,
                                         context_enabled=context_enabled,
                                         context_model=context_model if context_enabled else None,
-                                        group_name=group_name if group_name else None,
-                                        run_async=False,  # Run synchronously for Streamlit
+                                        name=group_name if group_name else None,
                                     )
                                 )
                                 loop.close()
@@ -382,9 +381,11 @@ if selected_doc_id:
                                 with st.expander("📊 Processing Results", expanded=True):
                                     col_res1, col_res2 = st.columns(2)
                                     with col_res1:
-                                        st.metric("Pages Processed", result.pages_processed)
+                                        st.metric(
+                                            "Pages Processed", result.get("pages_processed", "N/A")
+                                        )
                                     with col_res2:
-                                        st.metric("Document ID", result.document_id)
+                                        st.metric("Group ID", str(result.get("group_id", "N/A")))
 
                                     if context_enabled:
                                         st.markdown("**✨ AI Context Generation**")
@@ -395,21 +396,24 @@ if selected_doc_id:
                                         )
                                         st.write(f"- Prompt Caching: Enabled (cost optimized)")
 
-                                    # Get chunk statistics
+                                    # Get group statistics
                                     try:
-                                        stats_loop = asyncio.new_event_loop()
-                                        asyncio.set_event_loop(stats_loop)
-                                        stats = stats_loop.run_until_complete(
-                                            bridge.get_chunk_stats(selected_doc_id)
-                                        )
-                                        stats_loop.close()
-                                        st.metric("Chunks Created", stats["total_chunks"])
-                                        st.write("Page Status Summary:")
-                                        for status, count in stats["page_status_counts"].items():
-                                            st.write(f"- {status}: {count} pages")
+                                        if result.get("group_id"):
+                                            stats_loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(stats_loop)
+                                            stats = stats_loop.run_until_complete(
+                                                bridge.get_group_stats(result["group_id"])
+                                            )
+                                            stats_loop.close()
+                                            st.metric("Chunks Created", stats.get("chunk_count", 0))
+                                            st.write("Group Status Summary:")
+                                            st.write(f"- Status: {stats.get('status', 'unknown')}")
+                                            st.write(f"- Created: {stats.get('created_at', 'N/A')}")
+                                        else:
+                                            st.warning("Group ID not available in result")
                                     except Exception as stats_error:
                                         st.warning(
-                                            f"Could not retrieve chunk statistics: {stats_error}"
+                                            f"Could not retrieve group statistics: {stats_error}"
                                         )
 
                                     st.info(

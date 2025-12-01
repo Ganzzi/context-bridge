@@ -38,12 +38,14 @@ async def create_test_data():
         pages = await bridge.list_pages(doc_id)
         print(f"📄 Found {len(pages)} pages")
 
-        # Process pages into chunks
+        # Process pages into chunks via group creation
         if pages:
-            print("🔄 Processing pages into chunks...")
+            print("🔄 Creating group for pages...")
             page_ids = [p.id for p in pages]
-            chunk_result = await bridge.process_pages(doc_id, page_ids)
-            print(f"✅ Created chunks for {chunk_result.pages_processed} pages")
+            group_result = await bridge.create_group(
+                document_id=doc_id, page_ids=page_ids, name="test_docs_group"
+            )
+            print(f"✅ Created group with ID: {group_result.get('group_id', 'N/A')}")
 
         print("🎉 Test data creation complete!")
         print("   You can now test search functionality in the Streamlit app")

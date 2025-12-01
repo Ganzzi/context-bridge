@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "context-bridge"
-version = "0.2.0"
+version = "0.2.1"
 description = "Unified Python package for RAG documentation workflows - Crawl, embed, store, and retrieve technical documentation for AI agents"
 readme = "README.md"
 requires-python = ">=3.11"

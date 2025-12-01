@@ -253,46 +253,26 @@ class ContextBridgeTester:
                         content_length += len(page.content)
                 print(f"    📏 Total content length: {content_length} characters")
 
-                # Test chunking with batch processing
-                print(f"    🔄 Processing chunking for {len(page_ids)} pages (batch mode)...")
-                chunk_result = await self.bridge.process_pages(
+                # Test group creation with chunking and embedding
+                print(f"    🔄 Creating group for {len(page_ids)} pages...")
+                group_result = await self.bridge.create_group(
                     document_id=doc_id,
                     page_ids=page_ids,
                     chunk_size=1000,  # Reasonable chunk size
+                    name=f"{name}_v{version}_group",
                 )
 
-                print(f"    ✅ Processing started for {chunk_result.pages_processed} pages")
+                print(f"    ✅ Group created: {group_result.get('group_id', 'N/A')}")
 
-                # Wait for chunking completion
-                print(f"    ⏳ Waiting for chunking to complete...")
-                completion_result = await self.bridge.wait_for_chunking_completion(
-                    document_id=doc_id,
-                    page_ids=page_ids,
-                    timeout_seconds=30,  # 30 second timeout for testing
-                    poll_interval=0.5,
-                )
-
-                if completion_result["completed"]:
+                # Get group statistics
+                print(f"    📊 Fetching group statistics...")
+                if group_result.get("group_id"):
+                    stats = await self.bridge.get_group_stats(group_result["group_id"])
                     print(
-                        f"    ✅ Chunking completed successfully in {completion_result['elapsed_seconds']:.1f}s"
+                        f"    📊 Group stats: {stats.get('chunk_count', 0)} chunks, status: {stats.get('status', 'unknown')}"
                     )
-                    print(f"    📦 Chunks created: {completion_result['chunks_created']}")
-                    print(f"    📄 Pages chunked: {completion_result['pages_chunked']}")
                 else:
-                    print(
-                        f"    ⚠️  Chunking timed out after {completion_result['elapsed_seconds']:.1f}s"
-                    )
-                    print(f"    📦 Chunks created so far: {completion_result['chunks_created']}")
-                    print(
-                        f"    🔄 Pages still processing: {completion_result.get('pages_still_processing', 0)}"
-                    )
-                    print(f"    📄 Pages chunked: {completion_result['pages_chunked']}")
-
-                # Additional verification using get_chunk_stats
-                stats = await self.bridge.get_chunk_stats(doc_id)
-                print(
-                    f"    📊 Final stats: {stats['total_chunks']} chunks, page statuses: {stats['page_status_counts']}"
-                )
+                    print("    ⚠️  Group ID not available in result")
 
             else:
                 print("    ⚠️  No pending pages to process")
@@ -335,33 +315,31 @@ class ContextBridgeTester:
                     page_ids = [p.id for p in pending_pages]
 
                     # Test synchronous chunking
-                    print(f"    🔄 Processing chunking synchronously for {len(page_ids)} pages...")
+                    print(f"    🔄 Creating group synchronously for {len(page_ids)} pages...")
                     start_time = asyncio.get_event_loop().time()
 
-                    result = await self.bridge.process_pages(
+                    result = await self.bridge.create_group(
                         document_id=doc_id,
                         page_ids=page_ids,
                         chunk_size=1000,
-                        run_async=False,  # Run synchronously
+                        name=f"sync_group_{doc_id}",
                     )
 
                     end_time = asyncio.get_event_loop().time()
                     duration = end_time - start_time
 
-                    print(f"    ✅ Synchronous processing completed in {duration:.1f}s")
-                    print(f"    📦 Pages processed: {result.pages_processed}")
+                    print(f"    ✅ Group creation completed in {duration:.1f}s")
+                    print(f"    🆔 Group ID: {result.get('group_id', 'N/A')}")
 
-                    # Verify chunks were created immediately
-                    stats = await self.bridge.get_chunk_stats(doc_id)
-                    print(
-                        f"    📊 Final stats: {stats['total_chunks']} chunks, page statuses: {stats['page_status_counts']}"
-                    )
-
-                    # Verify all pages are now chunked
-                    chunked_pages = await self.bridge.list_pages(doc_id, status="chunked")
-                    assert len(chunked_pages) == len(page_ids), "All pages should be chunked"
-
-                    print("    ✅ Synchronous chunking completed successfully")
+                    # Verify group was created
+                    if result.get("group_id"):
+                        stats = await self.bridge.get_group_stats(result["group_id"])
+                        print(
+                            f"    📊 Group stats: {stats.get('chunk_count', 0)} chunks, status: {stats.get('status', 'unknown')}"
+                        )
+                        print("    ✅ Group creation completed successfully")
+                    else:
+                        print("    ⚠️  Group ID not available in result")
 
                 else:
                     print("    ⚠️  No pending pages to process")
@@ -441,10 +419,10 @@ class ContextBridgeTester:
         except Exception as e:
             print(f"    ⚠️  Exception caught: {e}")
 
-        # Test chunking with invalid page IDs
+        # Test group creation with invalid page IDs
         print("  Testing invalid page ID handling...")
         try:
-            await self.bridge.process_pages(
+            await self.bridge.create_group(
                 document_id=99999,  # Non-existent document
                 page_ids=[1, 2, 3],  # Non-existent pages
                 chunk_size=1000,

@@ -771,6 +771,7 @@ Comprehensive technical guides are available in `docs/`:
 - **[MCP Server Usage Guide](docs/guide/MCP_SERVER_USAGE.md)** - How to use the MCP server with AI clients
 
 ### Technical Guides (`docs/technical/`)
+- **[API Reference](docs/API.md)** - Complete Python API documentation
 - **[Crawl4AI Guide](docs/technical/crawl4ai_complete_guide.md)** - Complete crawling documentation
 - **[Embedding Service](docs/technical/embedding_service.md)** - Ollama and Gemini embedding setup
 - **[PSQLPy Guide](docs/technical/psqlpy-complete-guide.md)** - PostgreSQL driver usage

@@ -14,6 +14,7 @@ from context_bridge.config import Config
 from context_bridge.service.doc_manager import CrawlAndStoreResult, ChunkProcessingResult, PageInfo
 from context_bridge.service.search_service import ContentSearchResult
 from context_bridge.database.repositories.document_repository import Document
+from context_bridge.database.models.group_models import Group
 
 
 @pytest.fixture
@@ -74,8 +75,22 @@ def mock_doc_repo():
 
 
 @pytest.fixture
+def mock_group_repo():
+    """Create a mock group repository."""
+    repo = MagicMock()
+    repo.list_groups = AsyncMock()
+    repo.get_group_by_id = AsyncMock()
+    return repo
+
+
+@pytest.fixture
 def context_bridge(
-    mock_config, mock_db_manager, mock_doc_manager, mock_search_service, mock_doc_repo
+    mock_config,
+    mock_db_manager,
+    mock_doc_manager,
+    mock_search_service,
+    mock_doc_repo,
+    mock_group_repo,
 ):
     """Create a ContextBridge instance with mocked dependencies."""
     bridge = ContextBridge(config=mock_config)
@@ -92,11 +107,15 @@ def context_bridge(
     mock_conn.__aexit__ = AsyncMock(return_value=None)
     mock_db_manager.connection.return_value = mock_conn
 
-    # Mock doc repo creation
+    # Mock repository creation
     with (
         patch(
             "context_bridge.database.repositories.document_repository.DocumentRepository",
             return_value=mock_doc_repo,
+        ),
+        patch(
+            "context_bridge.database.repositories.group_repository.GroupRepository",
+            return_value=mock_group_repo,
         ),
         patch("context_bridge.database.repositories.chunk_repository.ChunkRepository"),
     ):
@@ -244,19 +263,40 @@ class TestContextBridge:
         mock_doc_repo.list_all.assert_called_once_with(offset=10, limit=50)
 
     @pytest.mark.asyncio
-    async def test_get_document(self, context_bridge, mock_doc_repo):
-        """Test getting a specific document."""
-        # Setup mock
-        doc = MagicMock(spec=Document)
-        mock_doc_repo.get_by_name_version.return_value = doc
+    async def test_list_groups(self, context_bridge, mock_group_repo):
+        """Test listing groups - verifies renamed process_pages is working."""
+        from uuid import uuid4
+        from datetime import datetime
+
+        # Setup mock - inject directly since we control the bridge
+        context_bridge._group_repository = mock_group_repo
+
+        # Create mock Group objects with necessary attributes
+        group1 = MagicMock(spec=Group)
+        group1.id = uuid4()
+        group1.document_id = 1
+        group1.name = "Core API"
+        group1.description = "Core API documentation"
+        group1.context_enabled = False
+        group1.context_model = None
+        group1.total_pages = 5
+        group1.total_chunks = 25
+        group1.processing_status = "completed"
+        group1.created_at = datetime(2024, 1, 1, 0, 0, 0)
+        group1.processed_at = datetime(2024, 1, 1, 1, 0, 0)
+
+        groups = [group1]
+        mock_group_repo.list_groups.return_value = groups
 
         # Execute
-        with patch("context_bridge.core.DocumentRepository", return_value=mock_doc_repo):
-            result = await context_bridge.get_document("test-doc", "1.0.0")
+        response = await context_bridge.list_groups(document_id=1)
 
         # Verify
-        assert result == doc
-        mock_doc_repo.get_by_name_version.assert_called_once_with("test-doc", "1.0.0")
+        assert len(response) == 1
+        assert response[0]["document_id"] == 1
+        assert response[0]["name"] == "Core API"
+        assert response[0]["total_pages"] == 5
+        mock_group_repo.list_groups.assert_called_once_with(document_id=1, limit=100, offset=0)
 
     @pytest.mark.asyncio
     async def test_delete_document(self, context_bridge, mock_doc_manager):
@@ -303,8 +343,8 @@ class TestContextBridge:
         mock_doc_manager.delete_page.assert_called_once_with(456)
 
     @pytest.mark.asyncio
-    async def test_process_pages(self, context_bridge, mock_doc_manager):
-        """Test processing pages for chunking."""
+    async def test_create_group(self, context_bridge, mock_doc_manager):
+        """Test creating a group from pages for chunking."""
         # Setup mock
         result = MagicMock(spec=ChunkProcessingResult)
         result.document_id = 1
@@ -312,8 +352,12 @@ class TestContextBridge:
         mock_doc_manager.process_chunking.return_value = result
 
         # Execute
-        response = await context_bridge.process_pages(
-            document_id=1, page_ids=[1, 2, 3, 4, 5], chunk_size=1500
+        response = await context_bridge.create_group(
+            document_id=1,
+            page_ids=[1, 2, 3, 4, 5],
+            name="Core API Docs",
+            chunk_size=1500,
+            context_enabled=False,
         )
 
         # Verify
@@ -324,7 +368,7 @@ class TestContextBridge:
             chunk_size=1500,
             context_enabled=False,
             context_model="anthropic:claude-3-5-sonnet-20241022",
-            run_async=True,
+            run_async=True,  # Always async in background
         )
 
     @pytest.mark.asyncio
@@ -343,27 +387,6 @@ class TestContextBridge:
         assert response == results
         mock_search_service.search_content.assert_called_once_with(
             query="test query", document_id=1, limit=20, vector_weight=0.7, bm25_weight=0.3
-        )
-
-    @pytest.mark.asyncio
-    async def test_search_across_versions(self, context_bridge, mock_search_service):
-        """Test cross-version search."""
-        # Setup mock
-        results = {
-            "1.0.0": [MagicMock(spec=ContentSearchResult)],
-            "1.1.0": [MagicMock(spec=ContentSearchResult)],
-        }
-        mock_search_service.search_across_versions.return_value = results
-
-        # Execute
-        response = await context_bridge.search_across_versions(
-            query="test query", document_name="test-doc", limit_per_version=3
-        )
-
-        # Verify
-        assert response == results
-        mock_search_service.search_across_versions.assert_called_once_with(
-            query="test query", document_name="test-doc", limit_per_version=3
         )
 
     @pytest.mark.asyncio

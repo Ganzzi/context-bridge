@@ -32,6 +32,7 @@ from context_bridge.database.repositories.chunk_repository import ChunkRepositor
 from context_bridge.database.repositories.tag_repository import TagRepository
 from context_bridge.database.repositories.group_repository import GroupRepository
 from context_bridge.database.models.tag_models import Tag, TagCreate, TagUpdate, TagCategory
+from context_bridge.database.models.group_models import ProcessingStatus
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,10 @@ class ContextBridge:
             pages = await bridge.list_pages(result.document_id)
         ```
     """
+
+    # -------------------------------------------------------------------------
+    # Lifecycle Methods
+    # -------------------------------------------------------------------------
 
     def __init__(self, config: Optional[Config] = None):
         """
@@ -205,7 +210,67 @@ class ContextBridge:
                 "ContextBridge not initialized. Call await bridge.initialize() first."
             )
 
+    def is_initialized(self) -> bool:
+        """
+        Check if ContextBridge is initialized.
+
+        Returns:
+            True if initialized, False otherwise
+        """
+        return self._initialized
+
+    def get_config(self) -> Config:
+        """
+        Get the current configuration.
+
+        Returns:
+            Config object
+        """
+        return self.config
+
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Perform a health check of all services.
+
+        Returns:
+            Dictionary with health status of each component
+        """
+        self._check_initialized()
+
+        health = {
+            "initialized": True,
+            "database": False,
+            "embedding_service": False,
+            "services": {},
+        }
+
+        # Check database
+        try:
+            async with self._db_manager.connection() as conn:
+                await conn.execute("SELECT 1")
+            health["database"] = True
+        except Exception as e:
+            health["database_error"] = str(e)
+
+        # Check embedding service
+        try:
+            health["embedding_service"] = (
+                await self._doc_manager.embedding_service.verify_connection()
+            )
+        except Exception as e:
+            health["embedding_service_error"] = str(e)
+
+        # Check services
+        health["services"] = {
+            "doc_manager": self._doc_manager is not None,
+            "search_service": self._search_service is not None,
+        }
+
+        return health
+
+    # -------------------------------------------------------------------------
     # Document Operations
+    # -------------------------------------------------------------------------
 
     async def crawl_documentation(
         self,
@@ -363,25 +428,6 @@ class ContextBridge:
             doc_repo = DocumentRepository(self._db_manager)
             return await doc_repo.list_all(limit=limit, offset=offset)
 
-    async def get_document(self, name: str, version: str) -> Optional[Document]:
-        """
-        Get a specific document by name and version.
-
-        Args:
-            name: Document name
-            version: Document version
-
-        Returns:
-            Document object or None if not found
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        async with self._db_manager.connection() as conn:
-            doc_repo = DocumentRepository(conn)
-            return await doc_repo.get_by_name_version(name, version)
-
     async def delete_document(self, document_id: int) -> bool:
         """
         Delete a document and all related data (pages, chunks).
@@ -398,7 +444,9 @@ class ContextBridge:
         self._check_initialized()
         return await self._doc_manager.delete_document(document_id)
 
+    # -------------------------------------------------------------------------
     # Page Operations
+    # -------------------------------------------------------------------------
 
     async def list_pages(
         self, document_id: int, status: Optional[str] = None, offset: int = 0, limit: int = 100
@@ -439,277 +487,9 @@ class ContextBridge:
         self._check_initialized()
         return await self._doc_manager.delete_page(page_id)
 
-    # Chunking Operations
-
-    async def process_pages(
-        self,
-        document_id: int,
-        page_ids: List[int],
-        chunk_size: Optional[int] = None,
-        context_enabled: bool = False,
-        context_model: Optional[str] = None,
-        run_async: bool = True,
-    ) -> ChunkProcessingResult:
-        """
-        Process pages for chunking and embedding with optional AI context generation.
-
-        Validates pages, combines content, chunks, generates embeddings,
-        and stores chunks with source page tracking. Optionally generates AI-powered
-        context for each chunk to improve search relevance.
-
-        Args:
-            document_id: Document ID
-            page_ids: List of page IDs to process together
-            chunk_size: Optional chunk size override
-            context_enabled: Whether to generate AI context for chunks
-            context_model: The model to use for context generation
-                          (e.g., "anthropic:claude-3-5-sonnet-20241022")
-            run_async: If True, run in background task. If False, run synchronously.
-
-        Returns:
-            ChunkProcessingResult with summary
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-            ValueError: If page validation fails
-        """
-        self._check_initialized()
-        return await self._doc_manager.process_chunking(
-            document_id=document_id,
-            page_ids=page_ids,
-            chunk_size=chunk_size,
-            context_enabled=context_enabled,
-            context_model=context_model or self.config.context_agent_model,
-            run_async=run_async,
-        )
-
-    async def wait_for_chunking_completion(
-        self,
-        document_id: int,
-        page_ids: List[int],
-        timeout_seconds: int = 60,
-        poll_interval: float = 1.0,
-    ) -> Dict[str, Any]:
-        """
-        Wait for chunking processing to complete for specified pages.
-
-        Polls the page status until all pages are either 'chunked' or 'deleted',
-        or timeout is reached.
-
-        Args:
-            document_id: Document ID
-            page_ids: List of page IDs that were submitted for processing
-            timeout_seconds: Maximum time to wait in seconds
-            poll_interval: How often to check status in seconds
-
-        Returns:
-            Dictionary with completion status and statistics
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-
-        import time
-
-        start_time = time.time()
-
-        logger.info(
-            f"⏳ Waiting for chunking completion of {len(page_ids)} pages in document {document_id}"
-        )
-
-        while time.time() - start_time < timeout_seconds:
-            # Check status of all pages
-            all_pages = await self.list_pages(document_id)
-            page_status_map = {p.id: p.status for p in all_pages if p.id in page_ids}
-
-            # Count statuses
-            processing = sum(1 for status in page_status_map.values() if status == "processing")
-            chunked = sum(1 for status in page_status_map.values() if status == "chunked")
-            deleted = sum(1 for status in page_status_map.values() if status == "deleted")
-            pending = sum(1 for status in page_status_map.values() if status == "pending")
-
-            total_accounted = processing + chunked + deleted + pending
-
-            logger.debug(
-                f"Chunking status: processing={processing}, chunked={chunked}, deleted={deleted}, pending={pending}, total={total_accounted}/{len(page_ids)}"
-            )
-
-            # Check if all pages are done processing
-            if processing == 0 and total_accounted == len(page_ids):
-                # Get chunk count
-                chunk_repo = ChunkRepository(self._db_manager)
-                chunk_count = await chunk_repo.count_by_document(document_id)
-
-                elapsed = time.time() - start_time
-                result = {
-                    "completed": True,
-                    "elapsed_seconds": elapsed,
-                    "pages_processed": len(page_ids),
-                    "pages_chunked": chunked,
-                    "pages_deleted": deleted,
-                    "pages_pending": pending,
-                    "chunks_created": chunk_count,
-                    "timeout": False,
-                }
-
-                logger.info(
-                    f"✅ Chunking completed in {elapsed:.1f}s: {chunked} pages chunked, {chunk_count} chunks created"
-                )
-                return result
-
-            await asyncio.sleep(poll_interval)
-
-        # Timeout reached
-        elapsed = time.time() - start_time
-        logger.warning(f"⏰ Chunking wait timeout after {elapsed:.1f}s")
-
-        # Get final status
-        all_pages = await self.list_pages(document_id)
-        page_status_map = {p.id: p.status for p in all_pages if p.id in page_ids}
-
-        processing = sum(1 for status in page_status_map.values() if status == "processing")
-        chunked = sum(1 for status in page_status_map.values() if status == "chunked")
-        deleted = sum(1 for status in page_status_map.values() if status == "deleted")
-        pending = sum(1 for status in page_status_map.values() if status == "pending")
-
-        chunk_repo = ChunkRepository(self._db_manager)
-        chunk_count = await chunk_repo.count_by_document(document_id)
-
-        return {
-            "completed": False,
-            "elapsed_seconds": elapsed,
-            "pages_processed": len(page_ids),
-            "pages_chunked": chunked,
-            "pages_deleted": deleted,
-            "pages_pending": pending,
-            "pages_still_processing": processing,
-            "chunks_created": chunk_count,
-            "timeout": True,
-        }
-
-    async def get_chunk_stats(self, document_id: int) -> Dict[str, Any]:
-        """
-        Get chunk statistics for a document.
-
-        Args:
-            document_id: Document ID
-
-        Returns:
-            Dictionary with chunk statistics
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-
-        chunk_repo = ChunkRepository(self._db_manager)
-        chunk_count = await chunk_repo.count_by_document(document_id)
-
-        # Get page status counts
-        all_pages = await self.list_pages(document_id)
-        page_stats = {}
-        for page in all_pages:
-            page_stats[page.status] = page_stats.get(page.status, 0) + 1
-
-        return {
-            "document_id": document_id,
-            "total_chunks": chunk_count,
-            "page_status_counts": page_stats,
-        }
-
-    # Search Operations
-
-    async def search(
-        self,
-        query: str,
-        document_id: int,
-        limit: int = 10,
-        vector_weight: Optional[float] = None,
-        bm25_weight: Optional[float] = None,
-    ) -> List[ContentSearchResult]:
-        """
-        Search within document content using hybrid search.
-
-        Args:
-            query: Search query
-            document_id: Document ID to search within
-            limit: Maximum results
-            vector_weight: Optional vector search weight (0-1)
-            bm25_weight: Optional BM25 search weight (0-1)
-
-        Returns:
-            List of ContentSearchResult objects ranked by relevance
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        return await self._search_service.search_content(
-            query=query,
-            document_id=document_id,
-            limit=limit,
-            vector_weight=vector_weight,
-            bm25_weight=bm25_weight,
-        )
-
-    async def search_across_versions(
-        self, query: str, document_name: str, limit_per_version: int = 5
-    ) -> Dict[str, List[ContentSearchResult]]:
-        """
-        Search across all versions of a document.
-
-        Args:
-            query: Search query
-            document_name: Name of the document to search across versions
-            limit_per_version: Maximum results per version
-
-        Returns:
-            Dictionary mapping version strings to lists of ContentSearchResult
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        return await self._search_service.search_across_versions(
-            query=query, document_name=document_name, limit_per_version=limit_per_version
-        )
-
-    # Tag Operations
-
-    async def list_tags(self, category: Optional[TagCategory] = None) -> List[Tag]:
-        """
-        List all available tags, optionally filtered by category.
-
-        Args:
-            category: Optional TagCategory to filter by
-
-        Returns:
-            List of Tag objects
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        return await self._tag_repository.list_tags(category=category)
-
-    async def get_document_tags(self, document_id: int) -> List[Tag]:
-        """
-        Get all tags for a document.
-
-        Args:
-            document_id: Document ID
-
-        Returns:
-            List of Tag objects associated with the document
-
-        Raises:
-            RuntimeError: If ContextBridge not initialized
-        """
-        self._check_initialized()
-        return await self._tag_repository.get_document_tags(document_id)
-
+    # -------------------------------------------------------------------------
     # Group Management Operations
+    # -------------------------------------------------------------------------
 
     async def list_groups(
         self, document_id: Optional[int] = None, limit: int = 100, offset: int = 0
@@ -771,95 +551,414 @@ class ContextBridge:
 
         return result
 
-    # Utility Methods
-
-    def get_config(self) -> Config:
+    async def get_group_stats(self, group_id: UUID) -> Dict[str, Any]:
         """
-        Get the current configuration.
+        Get detailed statistics for a specific group.
+
+        Provides comprehensive information about a group including its processing
+        status, content size, chunk count, and context generation settings.
+
+        Args:
+            group_id: UUID of the group
 
         Returns:
-            Config object
-        """
-        return self.config
-
-    def is_initialized(self) -> bool:
-        """
-        Check if ContextBridge is initialized.
-
-        Returns:
-            True if initialized, False otherwise
-        """
-        return self._initialized
-
-    async def health_check(self) -> Dict[str, Any]:
-        """
-        Perform a health check of all services.
-
-        Returns:
-            Dictionary with health status of each component
+            Dictionary with group statistics:
+            {
+                "group_id": str,  # UUID as string
+                "document_id": int,
+                "name": str | None,
+                "description": str | None,
+                "status": str,  # pending, processing, completed, failed, reprocessing
+                "context_enabled": bool,
+                "context_model": str | None,
+                "total_pages": int,
+                "total_chunks": int,
+                "chunks_by_status": {  # Breakdown of chunk statuses
+                    "completed": int,
+                    "pending": int,
+                },
+                "total_content_size": int,  # Total characters in all chunks
+                "created_at": str,  # ISO format timestamp
+                "processed_at": str | None,  # ISO format timestamp or None if not yet processed
+            }
 
         Raises:
             RuntimeError: If ContextBridge not initialized
+            ValueError: If group not found
+
+        Example:
+            ```python
+            async with ContextBridge() as bridge:
+                stats = await bridge.get_group_stats(UUID("550e8400-e29b-41d4-a716-446655440000"))
+                print(f"Group {stats['name']}: {stats['status']}")
+                print(f"Pages: {stats['total_pages']}, Chunks: {stats['total_chunks']}")
+            ```
         """
         self._check_initialized()
 
-        health = {
-            "initialized": True,
-            "database": False,
-            "embedding_service": False,
-            "services": {},
-        }
-
-        # Check database
         try:
-            async with self._db_manager.connection() as conn:
-                await conn.execute("SELECT 1")
-            health["database"] = True
+            # Get group info from repository
+            group = await self._group_repository.get_group_by_id(group_id)
+            if not group:
+                raise ValueError(f"Group {group_id} not found")
+
+            # Get chunk statistics
+            chunk_repo = ChunkRepository(self._db_manager)
+            chunk_stats = await chunk_repo.get_group_chunk_statistics(group_id)
+
+            # Calculate total content size
+            total_content_size = await chunk_repo.get_group_content_size(group_id)
+
+            return {
+                "group_id": str(group.id),
+                "document_id": group.document_id,
+                "name": group.name,
+                "description": group.description,
+                "status": group.processing_status,
+                "context_enabled": group.context_enabled,
+                "context_model": group.context_model,
+                "total_pages": group.total_pages,
+                "total_chunks": group.total_chunks,
+                "chunks_by_status": chunk_stats.get("by_status", {}),
+                "total_content_size": total_content_size or 0,
+                "created_at": group.created_at.isoformat(),
+                "processed_at": group.processed_at.isoformat() if group.processed_at else None,
+            }
+
         except Exception as e:
-            health["database_error"] = str(e)
+            logger.error(f"Failed to get group stats for {group_id}: {e}")
+            raise
 
-        # Check embedding service
-        try:
-            health["embedding_service"] = (
-                await self._doc_manager.embedding_service.verify_connection()
-            )
-        except Exception as e:
-            health["embedding_service_error"] = str(e)
+    # -------------------------------------------------------------------------
+    # Chunking Operations
+    # -------------------------------------------------------------------------
 
-        # Check services
-        health["services"] = {
-            "doc_manager": self._doc_manager is not None,
-            "search_service": self._search_service is not None,
-        }
-
-        return health
-    async def process_chunking(
+    async def create_group(
         self,
         document_id: int,
         page_ids: List[int],
+        name: Optional[str] = None,
         chunk_size: Optional[int] = None,
-        batch_enabled: bool = True,
-        run_async: bool = True,
-    ) -> ChunkProcessingResult:
+        context_enabled: bool = False,
+        context_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Process pages for chunking and embedding.
-        This creates a group and generates chunks for the specified pages.
+        Create a group from selected pages and process them for chunking and embedding.
+
+        This is the main workflow method that:
+        1. Groups selected pages together
+        2. Combines their content
+        3. Splits content into chunks
+        4. Generates embeddings for each chunk
+        5. Optionally generates AI-powered context for each chunk
+        6. Stores chunks in the database with group tracking
+
+        This operation runs asynchronously in the background. Use list_groups() to
+        monitor processing status.
 
         Args:
             document_id: Document ID
-            page_ids: List of page IDs to process
-            chunk_size: Optional chunk size override
-            batch_enabled: Whether to use batch processing
-            run_async: Whether to run in background
+            page_ids: List of page IDs to process together in one group
+            name: Optional human-readable name for the group (e.g., "API Documentation")
+            chunk_size: Optional chunk size override (characters). Default from config.
+            context_enabled: Whether to generate AI-powered context summaries for each chunk
+            context_model: LLM model for context generation (e.g., "anthropic:claude-3-5-sonnet-20241022")
+                          Only used if context_enabled=True. Default from config.
 
         Returns:
-            ChunkProcessingResult with processing details
+            Dictionary with processing details:
+            {
+                "group_id": str,  # UUID of the created group
+                "document_id": int,
+                "status": "processing",
+                "pages_selected": int,  # Number of pages in group
+                "estimated_chunks": int,  # Estimated chunk count
+                "context_enabled": bool,
+                "context_model": str | None,
+            }
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+            ValueError: If page validation fails (e.g., pages from different documents)
+
+        Example:
+            ```python
+            async with ContextBridge() as bridge:
+                # Crawl documentation
+                result = await bridge.crawl_documentation("mylib", "1.0.0", "https://docs.example.com")
+
+                # List pages
+                pages = await bridge.list_pages(result.document_id)
+                page_ids = [p.id for p in pages[:10]]
+
+                # Create group and process
+                group_result = await bridge.create_group(
+                    document_id=result.document_id,
+                    page_ids=page_ids,
+                    name="Core Documentation",
+                    context_enabled=True,
+                    context_model="anthropic:claude-3-5-sonnet-20241022"
+                )
+
+                # Monitor progress
+                groups = await bridge.list_groups(result.document_id)
+                for group in groups:
+                    print(f"Group {group['id']}: {group['processing_status']}")
+            ```
         """
         self._check_initialized()
         return await self._doc_manager.process_chunking(
             document_id=document_id,
             page_ids=page_ids,
             chunk_size=chunk_size,
-            batch_enabled=batch_enabled,
-            run_async=run_async,
+            context_enabled=context_enabled,
+            context_model=context_model or self.config.context_agent_model,
+            run_async=True,  # Always async in background
         )
+
+    async def list_reprocessable_groups(
+        self, document_id: Optional[int] = None, limit: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        List groups that can be re-processed with context generation.
+
+        Groups are eligible for re-processing if:
+        - They have completed processing (processing_status='completed')
+        - They don't have context enabled yet (context_enabled=False)
+
+        Re-processing allows you to:
+        - Add AI-generated context to previously processed groups
+        - Update context generation settings (model, temperature)
+        - Fix failed processing with new settings
+
+        Args:
+            document_id: Optional document ID to filter groups. If None, lists all reprocessable groups.
+            limit: Maximum number of results to return
+            offset: Pagination offset
+
+        Returns:
+            List of group dictionaries with metadata:
+            {
+                "id": str,  # UUID of the group
+                "document_id": int,
+                "name": str | None,
+                "description": str | None,
+                "total_pages": int,
+                "total_chunks": int,
+                "processing_status": str,  # Always "completed" for reprocessable groups
+                "context_enabled": bool,  # Always False for reprocessable groups
+                "created_at": str,  # ISO format timestamp
+                "processed_at": str | None,
+            }
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+
+        Example:
+            ```python
+            async with ContextBridge() as bridge:
+                # Find groups that need context generation
+                reprocessable = await bridge.list_reprocessable_groups(document_id=123)
+
+                for group in reprocessable:
+                    print(f"Group {group['name']}: {group['total_chunks']} chunks, no context yet")
+
+                    # Re-process with context
+                    result = await bridge.reprocess_group(
+                        group_id=UUID(group['id']),
+                        context_enabled=True,
+                        context_model="anthropic:claude-3-5-sonnet-20241022"
+                    )
+                    print(f"Re-processing complete: {result['chunks_created']} chunks")
+            ```
+        """
+        self._check_initialized()
+
+        # Get reprocessable groups from the group repository
+        # Filter for: completed status + no context enabled yet
+        reprocessable_groups = await self._group_repository.list_groups(
+            document_id=document_id,
+            processing_status=ProcessingStatus.COMPLETED,
+            context_enabled=False,
+            limit=limit,
+            offset=offset,
+        )
+
+        # Convert to dictionary format
+        result = []
+        for group in reprocessable_groups:
+            result.append(
+                {
+                    "id": str(group.id),
+                    "document_id": group.document_id,
+                    "name": group.name,
+                    "description": group.description,
+                    "total_pages": group.total_pages,
+                    "total_chunks": group.total_chunks,
+                    "processing_status": group.processing_status,
+                    "context_enabled": group.context_enabled,
+                    "created_at": group.created_at.isoformat(),
+                    "processed_at": group.processed_at.isoformat() if group.processed_at else None,
+                }
+            )
+
+        return result
+
+    async def reprocess_group(
+        self,
+        group_id: UUID,
+        context_enabled: bool = True,
+        context_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Re-process an existing group with new context generation settings.
+
+        Re-processing deletes all existing chunks for the group and regenerates them
+        with the specified new settings. This is useful for:
+        - Adding AI context generation to groups that were processed without it
+        - Updating context models or generation settings
+        - Fixing failed processing with new configuration
+
+        WARNING: This deletes all existing chunks for the group. Make sure you have
+        reviewed the current processing status before re-processing.
+
+        Args:
+            group_id: UUID of the group to re-process
+            context_enabled: Whether to enable context generation (default: True)
+            context_model: LLM model for context (e.g., "anthropic:claude-3-5-sonnet-20241022")
+                          Default: uses config.context_agent_model
+
+        Returns:
+            Dictionary with re-processing results:
+            {
+                "status": "success" | "failed" | "partial",
+                "group_id": str,
+                "chunks_deleted": int,  # Number of chunks deleted
+                "chunks_created": int,  # Number of new chunks created
+                "contexts_generated": int,  # Number of contexts generated (if enabled)
+                "context_enabled": bool,
+                "context_model": str | None,
+                "errors": int,  # Number of errors during processing
+            }
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+            ValueError: If group not found or cannot be reprocessed
+
+        Example:
+            ```python
+            async with ContextBridge() as bridge:
+                # List groups needing context
+                reprocessable = await bridge.list_reprocessable_groups(document_id=123)
+
+                if reprocessable:
+                    # Re-process the first group with context
+                    result = await bridge.reprocess_group(
+                        group_id=UUID(reprocessable[0]['id']),
+                        context_enabled=True,
+                        context_model="anthropic:claude-3-5-sonnet-20241022"
+                    )
+
+                    if result['status'] == 'success':
+                        print(f"✅ Re-processed: {result['chunks_created']} chunks with {result['contexts_generated']} contexts")
+                    else:
+                        print(f"⚠️  Partial success: {result['errors']} errors")
+            ```
+        """
+        self._check_initialized()
+
+        # Delegate to reprocessing service
+        reprocessing_service = ReprocessingService(
+            db_manager=self._db_manager,
+            chunking_service=ChunkingService(default_chunk_size=self.config.chunk_size),
+            embedding_service=EmbeddingService(self.config),
+            config=self.config,
+        )
+
+        try:
+            result = await reprocessing_service.reprocess_group(
+                group_id=group_id,
+                context_enabled=context_enabled,
+                context_model=context_model or self.config.context_agent_model,
+                force_delete_chunks=True,
+            )
+
+            logger.info(f"✅ Re-processed group {group_id}: {result}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to reprocess group {group_id}: {e}")
+            raise
+
+    # -------------------------------------------------------------------------
+    # Search Operations
+    # -------------------------------------------------------------------------
+
+    async def search(
+        self,
+        query: str,
+        document_id: int,
+        limit: int = 10,
+        vector_weight: Optional[float] = None,
+        bm25_weight: Optional[float] = None,
+    ) -> List[ContentSearchResult]:
+        """
+        Search within document content using hybrid search.
+
+        Args:
+            query: Search query
+            document_id: Document ID to search within
+            limit: Maximum results
+            vector_weight: Optional vector search weight (0-1)
+            bm25_weight: Optional BM25 search weight (0-1)
+
+        Returns:
+            List of ContentSearchResult objects ranked by relevance
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+        return await self._search_service.search_content(
+            query=query,
+            document_id=document_id,
+            limit=limit,
+            vector_weight=vector_weight,
+            bm25_weight=bm25_weight,
+        )
+
+    # -------------------------------------------------------------------------
+    # Tag Operations
+    # -------------------------------------------------------------------------
+
+    async def list_tags(self, category: Optional[TagCategory] = None) -> List[Tag]:
+        """
+        List all available tags, optionally filtered by category.
+
+        Args:
+            category: Optional TagCategory to filter by
+
+        Returns:
+            List of Tag objects
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+        return await self._tag_repository.list_tags(category=category)
+
+    async def get_document_tags(self, document_id: int) -> List[Tag]:
+        """
+        Get all tags for a document.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            List of Tag objects associated with the document
+
+        Raises:
+            RuntimeError: If ContextBridge not initialized
+        """
+        self._check_initialized()
+        return await self._tag_repository.get_document_tags(document_id)
