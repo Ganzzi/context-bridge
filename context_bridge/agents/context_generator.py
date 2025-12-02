@@ -10,17 +10,21 @@ Features:
 - Batch processing for multiple chunks
 - Error handling and graceful degradation
 - Support for multiple LLM providers (Anthropic, OpenAI)
+- Optional token usage tracking via pluggable processor
 """
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunUsage
 
 from context_bridge.config import Config
 from context_bridge.service.llm_model_provider import ModelProvider
+
+if TYPE_CHECKING:
+    from context_bridge.usage_processor import UsageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +69,16 @@ Please provide a short succinct context to situate this chunk within the overall
 class ContextGenerator:
     """Agent for generating contextual information for chunks using AI."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, usage_processor: Optional["UsageProcessor"] = None):
         """
         Initialize the context generation agent.
 
         Args:
             config: Configuration object with AI settings
+            usage_processor: Optional processor for tracking token usage from agent runs
         """
         self.config = config
+        self.usage_processor = usage_processor
 
         # Set up model provider with API keys from config
         api_keys = {}
@@ -156,6 +162,14 @@ class ContextGenerator:
         try:
             result = await self._agent.run(user_prompt)
             context = result.output.context
+
+            # Track token usage if processor is registered
+            if self.usage_processor:
+                try:
+                    await self.usage_processor(result.usage)
+                except Exception as e:
+                    logger.error(f"Error in usage processor: {e}", exc_info=True)
+                    # Don't raise - continue with context generation
 
             logger.debug(f"Generated context: {context[:100]}...")
             return context

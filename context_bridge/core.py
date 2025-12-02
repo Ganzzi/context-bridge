@@ -13,8 +13,11 @@ import asyncio
 from datetime import datetime
 from uuid import UUID
 
+from pydantic_ai import RunUsage
+
 from context_bridge.config import Config
 from context_bridge.database.postgres_manager import PostgreSQLManager
+from context_bridge.usage_processor import UsageProcessor
 from context_bridge.service.doc_manager import (
     DocManager,
     CrawlAndStoreResult,
@@ -144,6 +147,7 @@ class ContextBridge:
         self._search_service: Optional[SearchService] = None
         self._tag_repository: Optional[TagRepository] = None
         self._group_repository: Optional[GroupRepository] = None
+        self._usage_processor: Optional[UsageProcessor] = None
         self._initialized = False
 
         logger.info("ContextBridge instance created")
@@ -188,6 +192,7 @@ class ContextBridge:
             chunking_service=chunking_service,
             embedding_service=embedding_service,
             config=self.config,
+            usage_processor=self._usage_processor,
         )
 
         async with self._db_manager.connection() as conn:
@@ -273,6 +278,56 @@ class ContextBridge:
         }
 
         return health
+
+    def set_usage_processor(self, processor: Optional[UsageProcessor]) -> None:
+        """
+        Register a usage processor for tracking LLM token consumption.
+
+        The processor receives RunUsage data whenever a Pydantic AI agent completes
+        a run (e.g., during context generation). This enables applications to:
+
+        - Track token consumption per agent or operation
+        - Monitor costs based on LLM pricing
+        - Implement usage quotas or limits
+        - Collect analytics and metrics
+
+        The processor is called after each agent run and should handle errors
+        gracefully to avoid blocking agent operations.
+
+        Args:
+            processor: Async callable receiving RunUsage, or None to disable
+
+        Example:
+            ```python
+            # Simple logging processor
+            async def log_usage(usage: RunUsage) -> None:
+                print(f"Used {usage.input_tokens + usage.output_tokens} tokens")
+
+            bridge.set_usage_processor(log_usage)
+
+            # With state via closure
+            def create_counter():
+                stats = {"total": 0}
+                async def counter(usage: RunUsage) -> None:
+                    stats["total"] += usage.input_tokens + usage.output_tokens
+                return counter, stats
+
+            counter, stats = create_counter()
+            bridge.set_usage_processor(counter)
+            ```
+
+        Note:
+            Can be called before or after initialize(). If called after initialize(),
+            updates the DocManager's processor reference immediately.
+        """
+        self._usage_processor = processor
+        # Update DocManager's reference if already initialized
+        if self._doc_manager:
+            self._doc_manager.usage_processor = processor
+        if processor:
+            logger.debug(f"Usage processor registered: {processor}")
+        else:
+            logger.debug("Usage processor cleared")
 
     # -------------------------------------------------------------------------
     # Document Operations

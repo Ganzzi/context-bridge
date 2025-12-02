@@ -3,10 +3,13 @@
 This document provides a comprehensive reference for the `ContextBridge` class, the main entry point for the Context Bridge library.
 
 > **See also:** [Data Models Reference](MODELS.md) for detailed documentation of Pydantic models used in this API.
+> **See also:** [Usage Processor Guide](technical/usage-processor-guide.md) for LLM token tracking and cost monitoring.
 
 ## Table of Contents
 
 - [Initialization](#initialization)
+  - [Core Lifecycle Methods](#core-lifecycle-methods)
+  - [Usage Processor (Token Tracking)](#usage-processor-token-tracking)
 - [Configuration](#configuration)
 - [Document Operations](#document-operations)
 - [Page Operations](#page-operations)
@@ -19,7 +22,9 @@ This document provides a comprehensive reference for the `ContextBridge` class, 
 
 ## Initialization
 
-### `ContextBridge`
+### Core Lifecycle Methods
+
+#### `ContextBridge`
 
 The main class for interacting with the Context Bridge system.
 
@@ -39,7 +44,7 @@ async with ContextBridge() as bridge:
     pass
 ```
 
-### `initialize`
+#### `initialize`
 
 Initialize database connections and services. Must be called before using other methods if not using the context manager.
 
@@ -52,7 +57,7 @@ async def initialize() -> None
 - `ConnectionError`: If database connection fails or database is unreachable
 - `Exception`: If service initialization fails (embedding service, etc.)
 
-### `close`
+#### `close`
 
 Close all connections and cleanup resources.
 
@@ -60,7 +65,7 @@ Close all connections and cleanup resources.
 async def close() -> None
 ```
 
-### `is_initialized`
+#### `is_initialized`
 
 Check if the bridge is initialized.
 
@@ -68,7 +73,7 @@ Check if the bridge is initialized.
 def is_initialized() -> bool
 ```
 
-### `get_config`
+#### `get_config`
 
 Get the current configuration.
 
@@ -76,7 +81,7 @@ Get the current configuration.
 def get_config() -> Config
 ```
 
-### `health_check`
+#### `health_check`
 
 Perform a health check of all services.
 
@@ -86,6 +91,123 @@ async def health_check() -> Dict[str, Any]
 
 **Returns:**
 - Dictionary with health status of `database`, `embedding_service`, and other services.
+
+### Usage Processor (Token Tracking)
+
+#### `set_usage_processor`
+
+Register a usage processor for tracking LLM token consumption from Pydantic AI agents.
+
+```python
+def set_usage_processor(processor: Optional[UsageProcessor]) -> None
+```
+
+**Arguments:**
+- `processor` (Optional[UsageProcessor]): Async callable receiving `RunUsage` and returning None, or `None` to disable
+
+**Description:**
+
+The processor is an async function that receives `RunUsage` data whenever a Pydantic AI agent completes a run (e.g., during context generation). This enables applications to:
+
+- **Track token consumption** per agent or operation
+- **Monitor costs** based on LLM pricing  
+- **Implement quotas** or limits
+- **Collect analytics** and metrics
+
+**Example:**
+```python
+from context_bridge import ContextBridge
+from pydantic_ai import RunUsage
+
+# Simple logging processor
+async def log_usage(usage: RunUsage) -> None:
+    total = usage.input_tokens + usage.output_tokens
+    print(f"Agent used {total} tokens")
+
+async with ContextBridge() as bridge:
+    bridge.set_usage_processor(log_usage)
+    # Operations with context generation will call the processor
+    result = await bridge.create_group(
+        document_id=123,
+        page_ids=[1, 2, 3],
+        context_enabled=True
+    )
+```
+
+**Advanced Example with State Tracking:**
+```python
+# Create processor with internal state via closure
+def create_token_counter():
+    stats = {"total_tokens": 0, "run_count": 0}
+    
+    async def counter(usage: RunUsage) -> None:
+        stats["run_count"] += 1
+        stats["total_tokens"] += usage.input_tokens + usage.output_tokens
+        print(f"Run {stats['run_count']}: {usage.input_tokens + usage.output_tokens} tokens")
+    
+    return counter, stats
+
+counter_func, stats = create_token_counter()
+
+async with ContextBridge() as bridge:
+    bridge.set_usage_processor(counter_func)
+    
+    # Perform operations...
+    result = await bridge.create_group(...)
+    
+    # Access stats from closure
+    print(f"Total tokens: {stats['total_tokens']}")
+```
+
+**Cost Calculation Example:**
+```python
+def create_cost_tracker(input_price=3.0, output_price=15.0):
+    """Cost per 1M tokens."""
+    costs = {"total": 0.0}
+    
+    async def track_cost(usage: RunUsage) -> None:
+        input_cost = (usage.input_tokens / 1_000_000) * input_price
+        output_cost = (usage.output_tokens / 1_000_000) * output_price
+        total_cost = input_cost + output_cost
+        costs["total"] += total_cost
+        print(f"Cost: ${total_cost:.6f}, Total: ${costs['total']:.6f}")
+    
+    return track_cost, costs
+
+cost_func, costs = create_cost_tracker()
+bridge.set_usage_processor(cost_func)
+```
+
+bridge.set_usage_processor(log_usage)
+```
+
+**When Usage is Tracked:**
+- ✅ `create_group()` with `context_enabled=True` - AI context generation
+- ✅ `reprocess_group()` with `context_enabled=True` - AI context generation
+- ❌ Other operations - No agent usage
+
+**Best Practices:**
+1. Set processor before calling agent operations
+2. Processor should return None
+3. Handle exceptions in processor to avoid blocking operations
+4. Use closures to maintain state across multiple calls
+5. Keep processor logic lightweight
+6. Use `async def` for all processors
+
+**See Also:**
+- `examples/05_usage_processor_tracking.py` - Complete working examples with 5 patterns
+- [Usage Processor Guide](technical/usage-processor-guide.md) - Comprehensive guide
+
+### `get_usage_processor`
+
+Get the currently registered usage processor.
+
+```python
+def get_usage_processor() -> Optional[UsageProcessor]
+```
+
+**Returns:**
+- The registered processor or `None` if not set
 
 ---
 

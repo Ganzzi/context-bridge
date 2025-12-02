@@ -71,6 +71,7 @@ class DocManager:
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
         config: Config,
+        usage_processor=None,
     ):
         """Initialize the document manager.
 
@@ -80,12 +81,14 @@ class DocManager:
             chunking_service: Markdown chunking service
             embedding_service: Text embedding service
             config: Application configuration
+            usage_processor: Optional processor for tracking LLM token usage
         """
         self.db_manager = db_manager
         self.crawling_service = crawling_service
         self.chunking_service = chunking_service
         self.embedding_service = embedding_service
         self.config = config
+        self.usage_processor = usage_processor
 
         # Initialize repositories
         self.doc_repo = DocumentRepository(db_manager)
@@ -544,7 +547,7 @@ class DocManager:
             # Initialize context agent if needed
             context_agent = None
             if context_enabled and context_model:
-                context_agent = ContextGenerator(self.config)
+                context_agent = ContextGenerator(self.config, usage_processor=self.usage_processor)
                 logger.info(f"🤖 Initialized context agent with model {context_model}")
 
             # Process each page
