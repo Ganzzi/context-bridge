@@ -548,9 +548,9 @@ MIT License - See [LICENSE](../LICENSE) file for details
 
 For issues, questions, or contributions:
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/context_bridge/issues)
-- **Documentation**: [Full Documentation](https://yourusername.github.io/context_bridge)
-- **Email**: your.email@example.com
+- **Issues**: [GitHub Issues](https://github.com/Ganzzi/context-bridge/issues)
+- **Documentation**: [Full Documentation](https://github.com/Ganzzi/context-bridge)
+- **Email**: boinguyen9701@gmail.com
 
 ---
 

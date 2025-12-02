@@ -3,6 +3,7 @@
 > **Unified Python package for RAG-powered documentation management** - Crawl, store, chunk, and retrieve technical documentation with vector + BM25 hybrid search.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://badge.fury.io/py/context-bridge.svg)](https://pypi.org/project/context-bridge/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -39,6 +40,14 @@
 7. **Serves** via MCP (Model Context Protocol) for AI agent integration
 8. **Manages** through a Streamlit UI for human oversight
 
+### Current Version: v0.2.1
+
+**Latest Release**: December 1, 2025
+- ✅ **API Cleanup**: Removed 5 redundant methods, renamed `process_pages()` to `create_group()`
+- ✅ **Streamlit Integration**: Fixed all component references to use new API
+- ✅ **Enhanced Documentation**: Complete API reference and technical guides
+- ✅ **Quality Assurance**: 17/17 tests passing, no regressions detected
+
 ---
 
 ## ✨ Features
@@ -46,14 +55,18 @@
 ### Core Capabilities
 
 - **🕷️ Smart Crawling**: Automatically detect and crawl documentation sites, sitemaps, and text files
-- **📦 Intelligent Chunking**: Smart Markdown chunking that respects code blocks, paragraphs, and sentences
-- **🔍 Hybrid Search**: Dual vector + BM25 search for superior retrieval accuracy
-- **📚 Version Management**: Track multiple versions of the same documentation
-- **🎯 Document Organization**: Manual page grouping with size constraints before chunking
-- **⚡ High Performance**: PSQLPy for fast async PostgreSQL operations
-- **🤖 AI-Ready**: MCP server for seamless AI agent integration
-- **🎨 User-Friendly**: Streamlit UI for documentation management
+### Technical Features
 
+- **Vector Search**: Powered by vector extension with cosine similarity
+- **BM25 Full-Text Search**: Using vchord_bm25 extension for keyword matching
+- **Hybrid Search**: Combines vector and BM25 with configurable weights
+- **Async/Await**: Fully asynchronous operations for scalability
+- **Configurable Embeddings**: Support for Ollama (local) and Google Gemini (cloud)
+- **Type-Safe**: Pydantic models for configuration and data validation
+- **Modular Design**: Clean separation of concerns (repositories, services, managers)
+- **Group Management**: Organize pages into named groups for batch processing
+- **Reprocessing**: Re-process groups with new settings (context generation, etc.)
+- **Usage Tracking**: Optional token usage monitoring for cost optimization
 ### Technical Features
 
 - **Vector Search**: Powered by vector extension
@@ -162,17 +175,20 @@ pip install context-bridge
 ### Install with Optional Dependencies
 
 ```bash
-# With Gemini support
-pip install context-bridge[gemini]
-
-# With MCP server
+# With MCP server support
 pip install context-bridge[mcp]
 
 # With Streamlit UI
 pip install context-bridge[ui]
 
+# With AI features (Pydantic AI for context generation)
+pip install context-bridge[ai]
+
 # All features
 pip install context-bridge[all]
+
+# Development dependencies
+pip install context-bridge[dev]
 ```
 
 ### Running the Applications
@@ -198,7 +214,7 @@ uv run streamlit run streamlit_app/app.py
 ### Install from Source
 
 ```bash
-git clone https://github.com/yourusername/context-bridge.git
+git clone https://github.com/Ganzzi/context-bridge.git
 cd context-bridge
 pip install -e .
 ```
@@ -458,17 +474,14 @@ async def organize_documentation():
     bridge = ContextBridge()
     
     # Process specific pages as a group
-    result = await bridge.process_pages(
+    result = await bridge.create_group(
         document_id=doc_id,
         page_ids=[1, 2, 3, 4, 5],
-        chunk_size=2000,
-        group_name="API Reference",
-        group_description="REST API endpoints and examples"
+        name="API Reference",
+        chunk_size=2000
     )
     
-    print(f"Group created: {result.group_id}")
-    print(f"Pages processed: {result.pages_processed}")
-    print(f"Chunks created: {result.total_chunks}")
+    print(f"Group created: {result.get('group_id')}")
     
     # List all groups for a document
     groups = await bridge.list_groups(document_id=doc_id)
@@ -602,10 +615,6 @@ context-bridge-mcp
 **Integration with AI Clients:**
 The MCP server can be integrated with AI assistants like Claude Desktop for seamless documentation access.
 
-For detailed usage instructions, see the [MCP Server Usage Guide](docs/guide/MCP_SERVER_USAGE.md).
-
----
-
 ## 🗄️ Database Schema
 
 ### Core Tables
@@ -624,17 +633,32 @@ CREATE TABLE documents (
     UNIQUE(name, version)
 );
 
+-- Groups (page groupings for batch processing)
+CREATE TABLE groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    name TEXT,
+    description TEXT,
+    context_enabled BOOLEAN DEFAULT FALSE,
+    context_model TEXT,
+    total_pages INTEGER DEFAULT 0,
+    total_chunks INTEGER DEFAULT 0,
+    processing_status TEXT DEFAULT 'pending' CHECK (processing_status IN ('pending', 'processing', 'completed', 'failed', 'reprocessing')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    processed_at TIMESTAMPTZ
+);
+
 -- Pages (raw crawled content)
 CREATE TABLE pages (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
     url TEXT NOT NULL UNIQUE,
     content TEXT NOT NULL,
     content_hash TEXT NOT NULL,
     content_length INTEGER GENERATED ALWAYS AS (length(content)) STORED,
     crawled_at TIMESTAMPTZ DEFAULT NOW(),
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'chunked', 'deleted')),
-    group_id UUID, -- For future grouping feature
     metadata JSONB DEFAULT '{}'::jsonb
 );
 
@@ -642,9 +666,9 @@ CREATE TABLE pages (
 CREATE TABLE chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    group_id UUID, -- For future grouping feature
     embedding VECTOR(768), -- Dimension must match config
     bm25_vector bm25vector, -- Auto-generated by trigger
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -652,11 +676,18 @@ CREATE TABLE chunks (
 );
 
 -- Indexes
+CREATE INDEX idx_documents_name_version ON documents(name, version);
+CREATE INDEX idx_groups_document ON groups(document_id);
+CREATE INDEX idx_groups_status ON groups(processing_status);
 CREATE INDEX idx_pages_document ON pages(document_id);
+CREATE INDEX idx_pages_group ON pages(group_id);
 CREATE INDEX idx_pages_status ON pages(status);
 CREATE INDEX idx_pages_hash ON pages(content_hash);
-CREATE INDEX idx_pages_group ON pages(group_id);
 CREATE INDEX idx_chunks_document ON chunks(document_id);
+CREATE INDEX idx_chunks_group ON chunks(group_id);
+CREATE INDEX idx_chunks_vector ON chunks USING ivfflat(embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_chunks_bm25 ON chunks USING bm25(bm25_vector bm25_ops);
+```ATE INDEX idx_chunks_document ON chunks(document_id);
 CREATE INDEX idx_chunks_group ON chunks(group_id);
 CREATE INDEX idx_chunks_vector ON chunks USING ivfflat(embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX idx_chunks_bm25 ON chunks USING bm25(bm25_vector bm25_ops);
@@ -688,7 +719,12 @@ context_bridge/               # Core package
 │   ├── chunking_service.py
 │   ├── embedding.py
 │   ├── search_service.py
-│   └── url_service.py
+│   ├── url_service.py
+│   └── reprocessing_service.py
+└── database/
+    └── models/
+        ├── group_models.py
+        └── tag_models.py
 
 context_bridge_mcp/          # MCP Server (Model Context Protocol)
 ├── __init__.py
@@ -708,11 +744,13 @@ streamlit_app/               # Streamlit Web UI
 └── README.md                 # UI-specific documentation
 
 docs/                        # Documentation
-├── guide/
-│   └── MCP_SERVER_USAGE.md   # MCP server usage guide
+├── API.md                   # Complete API reference
+├── ARCHITECTURE.md          # System architecture
+├── guide/                   # User guides
 ├── plan/                    # Development plans
-│   └── ui_and_mcp_implementation_plan.md
 ├── technical/               # Technical guides
+│   ├── knowledge-graph-storage-guide.md
+│   ├── usage-processor-guide.md
 │   ├── crawl4ai_complete_guide.md
 │   ├── embedding_service.md
 │   ├── psqlpy-complete-guide.md
@@ -728,6 +766,12 @@ tests/                       # Test suite
 └── e2e/                     # End-to-end tests
     ├── conftest.py
     └── test_streamlit_ui.py
+
+scripts/                     # Utility scripts
+├── create_test_data.py      # Generate test data
+└── test_context_bridge.py   # Integration tests
+
+RELEASE_v0.2.1_SUMMARY.md    # Release documentation
 ```
 ```
 
@@ -772,6 +816,8 @@ Comprehensive technical guides are available in `docs/`:
 
 ### Technical Guides (`docs/technical/`)
 - **[API Reference](docs/API.md)** - Complete Python API documentation
+- **[Knowledge Graph Storage Guide](docs/technical/knowledge-graph-storage-guide.md)** - Neo4j integration patterns
+- **[Usage Processor Guide](docs/technical/usage-processor-guide.md)** - Token usage tracking and cost monitoring
 - **[Crawl4AI Guide](docs/technical/crawl4ai_complete_guide.md)** - Complete crawling documentation
 - **[Embedding Service](docs/technical/embedding_service.md)** - Ollama and Gemini embedding setup
 - **[PSQLPy Guide](docs/technical/psqlpy-complete-guide.md)** - PostgreSQL driver usage
@@ -807,16 +853,19 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **[Crawl4AI](https://github.com/unclecode/crawl4ai)** - High-performance web crawler
 - **[PSQLPy](https://github.com/qaspen-python/psqlpy)** - Async PostgreSQL driver
 - **[pgvector](https://github.com/pgvector/pgvector)** - Vector similarity search
+- **[vchord-bm25](https://github.com/tensorchord/vchord)** - BM25 full-text search
+- **[Pydantic AI](https://ai.pydantic.dev/)** - AI agent framework
 - **[MCP](https://modelcontextprotocol.io/)** - Model Context Protocol
+- **[Streamlit](https://streamlit.io/)** - Web UI framework
 
 ---
 
 ## 📧 Support
 
 For questions, issues, or feature requests:
-- **Issues**: [GitHub Issues](https://github.com/yourusername/context-bridge/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/context-bridge/discussions)
-- **Email**: your.email@example.com
+- **Issues**: [GitHub Issues](https://github.com/Ganzzi/context-bridge/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Ganzzi/context-bridge/discussions)
+- **Email**: boinguyen9701@gmail.com
 
 ---
 
