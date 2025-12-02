@@ -33,7 +33,6 @@ def mock_config():
         context_agent_temperature=0.3,
         context_agent_max_tokens=500,
         context_batch_size=10,
-        context_enable_cache=True,
         anthropic_api_key="test-anthropic-key",
         openai_api_key=None,
     )

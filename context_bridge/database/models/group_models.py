@@ -178,3 +178,165 @@ class GroupProcessingResult(BaseModel):
     duration_seconds: float = 0.0
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class GroupInfo(BaseModel):
+    """
+    Group information returned by list_groups() and list_reprocessable_groups().
+
+    Provides a summary of group metadata and processing status for display
+    in UI lists and API responses.
+
+    Attributes:
+        id: UUID of the group (as string for JSON serialization)
+        document_id: Reference to parent document
+        name: Optional human-readable name
+        description: Optional description
+        context_enabled: Whether context generation was applied
+        context_model: Model used for context generation (if enabled)
+        total_pages: Number of pages in this group
+        total_chunks: Number of chunks generated
+        processing_status: Current status (pending, processing, completed, failed, reprocessing)
+        created_at: ISO format timestamp of creation
+        processed_at: ISO format timestamp of completion (None if not processed)
+    """
+
+    id: str  # UUID as string for JSON serialization
+    document_id: int
+    name: Optional[str] = None
+    description: Optional[str] = None
+    context_enabled: bool = False
+    context_model: Optional[str] = None
+    total_pages: int = 0
+    total_chunks: int = 0
+    processing_status: str
+    created_at: str  # ISO format timestamp
+    processed_at: Optional[str] = None  # ISO format timestamp
+
+    class Config:
+        from_attributes = True
+
+    @classmethod
+    def from_group(cls, group: "Group") -> "GroupInfo":
+        """Create GroupInfo from a Group model."""
+        return cls(
+            id=str(group.id),
+            document_id=group.document_id,
+            name=group.name,
+            description=group.description,
+            context_enabled=group.context_enabled,
+            context_model=group.context_model,
+            total_pages=group.total_pages,
+            total_chunks=group.total_chunks,
+            processing_status=(
+                group.processing_status.value
+                if isinstance(group.processing_status, ProcessingStatus)
+                else group.processing_status
+            ),
+            created_at=group.created_at.isoformat(),
+            processed_at=group.processed_at.isoformat() if group.processed_at else None,
+        )
+
+
+class GroupStats(BaseModel):
+    """
+    Detailed statistics for a specific group.
+
+    Returned by get_group_stats() with comprehensive information about
+    group processing status, content size, and chunk breakdown.
+
+    Attributes:
+        group_id: UUID of the group (as string)
+        document_id: Reference to parent document
+        name: Optional human-readable name
+        description: Optional description
+        status: Current processing status
+        context_enabled: Whether context generation was applied
+        context_model: Model used for context generation
+        total_pages: Number of pages in group
+        total_chunks: Number of chunks generated
+        chunks_by_status: Breakdown of chunks by status (e.g., {"completed": 10, "pending": 0})
+        total_content_size: Total characters across all chunks
+        created_at: ISO format timestamp of creation
+        processed_at: ISO format timestamp of completion (None if not processed)
+    """
+
+    group_id: str  # UUID as string
+    document_id: int
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: str
+    context_enabled: bool = False
+    context_model: Optional[str] = None
+    total_pages: int = 0
+    total_chunks: int = 0
+    chunks_by_status: Dict[str, int] = Field(default_factory=dict)
+    total_content_size: int = 0
+    created_at: str  # ISO format timestamp
+    processed_at: Optional[str] = None  # ISO format timestamp
+
+    class Config:
+        from_attributes = True
+
+
+class GroupCreationResult(BaseModel):
+    """
+    Result of create_group() operation.
+
+    Returned immediately when group processing is initiated. Since processing
+    runs asynchronously, this indicates that the group has been created and
+    queued for processing.
+
+    Attributes:
+        group_id: UUID of the created group (as string)
+        document_id: Reference to parent document
+        status: Always "processing" for async operations
+        pages_selected: Number of pages included in the group
+        estimated_chunks: Estimated number of chunks (based on content size)
+        context_enabled: Whether context generation is enabled
+        context_model: Model to use for context generation (if enabled)
+    """
+
+    group_id: str  # UUID as string
+    document_id: int
+    status: str = "processing"
+    pages_selected: int = 0
+    estimated_chunks: int = 0
+    context_enabled: bool = False
+    context_model: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReprocessingResult(BaseModel):
+    """
+    Result of reprocess_group() operation.
+
+    Contains details about the reprocessing outcome including counts of
+    deleted and created chunks, and any errors encountered.
+
+    Attributes:
+        status: Overall status ("success", "failed", or "partial")
+        group_id: UUID of the reprocessed group (as string)
+        chunks_deleted: Number of chunks deleted before reprocessing
+        chunks_created: Number of new chunks created
+        contexts_generated: Number of context strings generated (if context enabled)
+        context_enabled: Whether context generation was used
+        context_model: Model used for context generation (if any)
+        errors: Number of errors encountered during processing
+        error_messages: List of error messages (if any)
+    """
+
+    status: str  # "success", "failed", or "partial"
+    group_id: str  # UUID as string
+    chunks_deleted: int = 0
+    chunks_created: int = 0
+    contexts_generated: int = 0
+    context_enabled: bool = False
+    context_model: Optional[str] = None
+    errors: int = 0
+    error_messages: list[str] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True

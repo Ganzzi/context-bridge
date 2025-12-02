@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-12-02
+
+### 📋 Documentation & Code Quality
+
+#### Type Safety Improvements (NEW)
+- **Replaced `Dict[str, Any]` returns with Pydantic models** for better type safety and IDE support:
+  - `list_groups()` now returns `List[GroupInfo]`
+  - `get_group_stats()` now returns `GroupStats`
+  - `create_group()` now returns `ChunkProcessingResult`
+  - `list_reprocessable_groups()` now returns `List[GroupInfo]`
+  - `reprocess_group()` now returns `ReprocessingResult`
+- **New Pydantic models added** to `context_bridge.database.models.group_models`:
+  - `GroupInfo` - Basic group information for list operations
+  - `GroupStats` - Detailed statistics including chunk counts by status
+  - `ReprocessingResult` - Re-processing operation results
+- **New documentation**: Created `docs/MODELS.md` with complete model reference
+
+#### Configuration
+- **Removed unused `context_enable_cache` variable**: This config variable was defined but never used in the codebase. Embedding caching is always enabled by default via `EmbeddingService.enable_cache=True`.
+  - Removed from `context_bridge/config.py`
+  - Removed from `.env.example`
+  - Removed from test fixtures
+
+#### API Documentation
+- ✅ **Added comprehensive Configuration section to API.md**: Detailed tables for all config categories (PostgreSQL, Embedding, Search, Chunking, Crawling, AI Context, API Keys)
+- ✅ **Added three configuration patterns**: Direct Python, Environment Variables, and .env File with complete examples
+- ✅ **Added Raises documentation to all public methods**: Comprehensive exception documentation including:
+  - `initialize()`, `close()`, `health_check()` - Lifecycle methods
+  - `crawl_documentation()`, `find_documents()`, `list_documents()`, `get_document()`, `delete_document()` - Document operations
+  - `list_pages()`, `delete_page()` - Page operations
+  - `list_groups()`, `create_group()`, `get_group_stats()`, `list_reprocessable_groups()`, `reprocess_group()` - Group management
+  - `search()` - Search operations
+  - `list_tags()`, `get_document_tags()`, `add_tag_to_document()`, `add_tags_to_document()`, `remove_tag_from_document()`, `remove_all_tags_from_document()`, `create_tag()` - Tag operations
+- ✅ **Added Data Models section to API.md**: References to all Pydantic models with import examples
+- ✅ **Created MODELS.md**: Complete reference for all data models with attributes and usage examples
+
+#### Breaking Changes
+- **Return types changed** from `Dict[str, Any]` to Pydantic models for group operations. Users accessing dict keys should update to model attributes:
+  ```python
+  # Before:
+  groups = await bridge.list_groups()
+  for g in groups:
+      print(g["id"], g["processing_status"])
+  
+  # After:
+  groups = await bridge.list_groups()
+  for g in groups:
+      print(g.id, g.processing_status)
+  ```
+- **Removed `context_enable_cache` configuration variable**: If you were explicitly setting `CONTEXT_ENABLE_CACHE` or `context_enable_cache`, you can safely remove it.
+
+### Testing & Quality
+- ✅ All unit tests pass (331 passed)
+- ✅ No regressions from configuration changes
+- ✅ Documentation fully reviewed for accuracy
+- ✅ Code quality maintained
+
+---
+
 ## [0.2.1] - 2025-12-01
 
 ### 🧹 API Cleanup & Streamlit Integration

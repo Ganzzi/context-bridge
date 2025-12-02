@@ -155,10 +155,6 @@ class Config(BaseModel):
         description="Number of chunks to process in parallel for context generation",
         ge=1,
     )
-    context_enable_cache: bool = Field(
-        default_factory=lambda: os.getenv("CONTEXT_ENABLE_CACHE", "true").lower() == "true",
-        description="Enable prompt caching for cost savings",
-    )
 
     # API Keys for context generation
     anthropic_api_key: Optional[str] = Field(

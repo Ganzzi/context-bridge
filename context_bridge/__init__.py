@@ -4,5 +4,15 @@ __version__ = "0.2.1"
 
 from .config import Config, get_config, set_config
 from .core import ContextBridge
+from .database.models.tag_models import Tag, TagCategory, TagCreate, TagUpdate
 
-__all__ = ["Config", "get_config", "set_config", "ContextBridge"]
+__all__ = [
+    "Config",
+    "get_config",
+    "set_config",
+    "ContextBridge",
+    "Tag",
+    "TagCategory",
+    "TagCreate",
+    "TagUpdate",
+]
