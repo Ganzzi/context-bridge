@@ -24,6 +24,7 @@ from context_bridge.service.crawling_service import CrawlingService
 from context_bridge.service.chunking_service import ChunkingService
 from context_bridge.service.embedding import EmbeddingService
 from context_bridge.agents.context_generator import ContextGenerator
+from context_bridge.service.llm_model_provider import LLMExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class DocManager:
         embedding_service: EmbeddingService,
         config: Config,
         usage_processor=None,
+        llm_executor: Optional[LLMExecutor] = None,
+        llm_backend_mode: bool = False,
     ):
         """Initialize the document manager.
 
@@ -89,6 +92,8 @@ class DocManager:
         self.embedding_service = embedding_service
         self.config = config
         self.usage_processor = usage_processor
+        self.llm_executor = llm_executor
+        self.llm_backend_mode = llm_backend_mode
 
         # Initialize repositories
         self.doc_repo = DocumentRepository(db_manager)
@@ -547,7 +552,12 @@ class DocManager:
             # Initialize context agent if needed
             context_agent = None
             if context_enabled and context_model:
-                context_agent = ContextGenerator(self.config, usage_processor=self.usage_processor)
+                context_agent = ContextGenerator(
+                    self.config,
+                    usage_processor=self.usage_processor,
+                    executor=self.llm_executor,
+                    backend_mode=self.llm_backend_mode,
+                )
                 logger.info(f"🤖 Initialized context agent with model {context_model}")
 
             # Process each page

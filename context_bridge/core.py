@@ -28,6 +28,7 @@ from context_bridge.service.search_service import SearchService, ContentSearchRe
 from context_bridge.service.crawling_service import CrawlingService, CrawlConfig
 from context_bridge.service.chunking_service import ChunkingService
 from context_bridge.service.embedding import EmbeddingService
+from context_bridge.service.llm_model_provider import LLMExecutor
 from context_bridge.service.url_service import UrlService
 from context_bridge.service.reprocessing_service import ReprocessingService
 from context_bridge.database.repositories.document_repository import DocumentRepository, Document
@@ -148,6 +149,8 @@ class ContextBridge:
         self._tag_repository: Optional[TagRepository] = None
         self._group_repository: Optional[GroupRepository] = None
         self._usage_processor: Optional[UsageProcessor] = None
+        self._llm_executor: Optional[LLMExecutor] = None
+        self._llm_backend_mode: bool = False
         self._initialized = False
 
         logger.info("ContextBridge instance created")
@@ -193,6 +196,8 @@ class ContextBridge:
             embedding_service=embedding_service,
             config=self.config,
             usage_processor=self._usage_processor,
+            llm_executor=self._llm_executor,
+            llm_backend_mode=self._llm_backend_mode,
         )
 
         async with self._db_manager.connection() as conn:
@@ -328,6 +333,28 @@ class ContextBridge:
             logger.debug(f"Usage processor registered: {processor}")
         else:
             logger.debug("Usage processor cleared")
+
+    def set_llm_executor(
+        self,
+        executor: Optional[LLMExecutor],
+        *,
+        backend_mode: bool = True,
+    ) -> None:
+        """
+        Register or clear the LLM executor used for context generation calls.
+
+        In backend mode, context generation must run through an injected executor
+        so all requests are attributed and routed consistently.
+        """
+        self._llm_executor = executor
+        self._llm_backend_mode = backend_mode
+        if self._doc_manager:
+            self._doc_manager.llm_executor = executor
+            self._doc_manager.llm_backend_mode = backend_mode
+        if executor:
+            logger.info("LLM executor registered for ContextBridge")
+        else:
+            logger.info("LLM executor cleared for ContextBridge")
 
     # -------------------------------------------------------------------------
     # Document Operations
@@ -882,6 +909,8 @@ class ContextBridge:
             chunking_service=ChunkingService(default_chunk_size=self.config.chunk_size),
             embedding_service=EmbeddingService(self.config),
             config=self.config,
+            llm_executor=self._llm_executor,
+            llm_backend_mode=self._llm_backend_mode,
         )
 
         try:

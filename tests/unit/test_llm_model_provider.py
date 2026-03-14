@@ -2,6 +2,7 @@
 
 import os
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 from context_bridge.service.llm_model_provider import ModelProvider
 
 
@@ -36,7 +37,6 @@ class TestModelProvider:
     def test_supports_provider_unsupported(self):
         """Test that unsupported providers return False."""
         provider = ModelProvider()
-        assert provider.supports_provider("google") is False
         assert provider.supports_provider("bedrock") is False
 
     def test_get_supported_providers(self):
@@ -45,7 +45,8 @@ class TestModelProvider:
         supported = provider.get_supported_providers()
         assert "openai" in supported
         assert "anthropic" in supported
-        assert len(supported) == 2
+        assert "google" in supported
+        assert "grok" in supported
 
     def test_get_api_key_from_dict(self):
         """Test retrieving API key from provided dict."""
@@ -111,6 +112,41 @@ class TestModelProvider:
         except Exception as e:
             # Should not be format error
             assert "Invalid model_info format" not in str(e)
+
+    def test_get_model_backend_mode_requires_executor(self):
+        """Test backend mode hard-fails when executor is missing."""
+        provider = ModelProvider(backend_mode=True)
+        with pytest.raises(RuntimeError) as exc_info:
+            provider.get_model("anthropic:claude-3-5-sonnet-20241022")
+        assert "No LLM executor injected" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_run_agent_uses_injected_executor(self):
+        """Test run_agent routes through injected executor when configured."""
+        executor = AsyncMock(
+            return_value={
+                "text": "executor-response",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
+        provider = ModelProvider(executor=executor)
+        mock_agent = MagicMock()
+        mock_agent.output_type = str
+        mock_agent.run = AsyncMock()
+
+        result = await provider.run_agent(
+            mock_agent,
+            "hello",
+            metadata={"source_component": "ctx_bridge", "operation": "context_generation"},
+            model_info="anthropic:claude-3-5-sonnet-20241022",
+            model_settings={"temperature": 0.3},
+        )
+
+        mock_agent.run.assert_not_called()
+        executor.assert_awaited_once()
+        assert result.output == "executor-response"
+        assert result.usage().input_tokens == 10
+        assert result.usage().output_tokens == 5
 
 
 class TestModelProviderIntegration:

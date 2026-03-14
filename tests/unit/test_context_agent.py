@@ -77,7 +77,7 @@ class TestContextGeneratorInit:
             agent = ContextGenerator(config)
 
             assert agent.config == config
-            mock_provider_class.assert_called_once_with({})
+            mock_provider_class.assert_called_once_with({}, executor=None, backend_mode=False)
 
     def test_init_with_partial_api_keys(self):
         """Test initialization with only some API keys."""
@@ -90,7 +90,11 @@ class TestContextGeneratorInit:
         with patch("context_bridge.agents.context_generator.ModelProvider") as mock_provider_class:
             agent = ContextGenerator(config)
 
-            mock_provider_class.assert_called_once_with({"openai": "test-openai-key"})
+            mock_provider_class.assert_called_once_with(
+                {"openai": "test-openai-key"},
+                executor=None,
+                backend_mode=False,
+            )
 
 
 class TestContextGeneratorCreateAgent:
@@ -414,7 +418,11 @@ class TestContextGenerationIntegration:
             agent = ContextGenerator(mock_config)
 
             # Verify ModelProvider was initialized with correct API keys
-            mock_provider_class.assert_called_once_with({"anthropic": "test-anthropic-key"})
+            mock_provider_class.assert_called_once_with(
+                {"anthropic": "test-anthropic-key"},
+                executor=None,
+                backend_mode=False,
+            )
 
     @pytest.mark.asyncio
     async def test_error_recovery_maintains_functionality(self, mock_config):

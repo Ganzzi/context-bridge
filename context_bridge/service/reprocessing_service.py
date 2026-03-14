@@ -18,6 +18,7 @@ from context_bridge.database.repositories.group_repository import GroupRepositor
 from context_bridge.database.repositories.page_repository import PageRepository
 from context_bridge.service.chunking_service import ChunkingService
 from context_bridge.service.embedding import EmbeddingService
+from context_bridge.service.llm_model_provider import LLMExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ class ReprocessingService:
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
         config: Config,
+        llm_executor: Optional[LLMExecutor] = None,
+        llm_backend_mode: bool = False,
     ):
         """
         Initialize the reprocessing service.
@@ -45,6 +48,8 @@ class ReprocessingService:
         self.chunking_service = chunking_service
         self.embedding_service = embedding_service
         self.config = config
+        self.llm_executor = llm_executor
+        self.llm_backend_mode = llm_backend_mode
 
         # Initialize repositories
         self.group_repo = GroupRepository(db_manager)
@@ -55,7 +60,11 @@ class ReprocessingService:
         try:
             from context_bridge.agents.context_generator import ContextGenerator
 
-            self.context_agent = ContextGenerator(config)
+            self.context_agent = ContextGenerator(
+                config,
+                executor=self.llm_executor,
+                backend_mode=self.llm_backend_mode,
+            )
         except ImportError:
             self.context_agent = None
             logger.warning("ContextGenerator not available, context generation disabled")

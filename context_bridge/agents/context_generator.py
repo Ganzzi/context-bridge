@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunUsage
 
 from context_bridge.config import Config
-from context_bridge.service.llm_model_provider import ModelProvider
+from context_bridge.service.llm_model_provider import LLMExecutor, ModelProvider
 
 if TYPE_CHECKING:
     from context_bridge.usage_processor import UsageProcessor
@@ -69,7 +69,13 @@ Please provide a short succinct context to situate this chunk within the overall
 class ContextGenerator:
     """Agent for generating contextual information for chunks using AI."""
 
-    def __init__(self, config: Config, usage_processor: Optional["UsageProcessor"] = None):
+    def __init__(
+        self,
+        config: Config,
+        usage_processor: Optional["UsageProcessor"] = None,
+        executor: Optional[LLMExecutor] = None,
+        backend_mode: bool = False,
+    ):
         """
         Initialize the context generation agent.
 
@@ -91,7 +97,11 @@ class ContextGenerator:
         if config.grok_api_key:
             api_keys["grok"] = config.grok_api_key
 
-        self.model_provider = ModelProvider(api_keys)
+        self.model_provider = ModelProvider(
+            api_keys,
+            executor=executor,
+            backend_mode=backend_mode,
+        )
 
         # Cache agent and document content for prompt caching efficiency
         self._agent: Optional[Agent] = None
@@ -132,6 +142,18 @@ class ContextGenerator:
         )
         return agent
 
+    @staticmethod
+    def _get_usage(result: object) -> Optional[RunUsage]:
+        """Extract RunUsage from pydantic-ai or executor shim results."""
+        usage_attr = getattr(result, "usage", None)
+        if usage_attr is None:
+            return None
+        if callable(usage_attr):
+            return usage_attr()
+        if isinstance(usage_attr, RunUsage):
+            return usage_attr
+        return None
+
     async def generate_context(
         self,
         chunk_content: str,
@@ -160,13 +182,31 @@ class ContextGenerator:
         user_prompt = USER_PROMPT_TEMPLATE.format(chunk_content=chunk_content)
 
         try:
-            result = await self._agent.run(user_prompt)
+            provider_call = self.model_provider.run_agent(
+                self._agent,
+                user_prompt,
+                model_info=self.config.context_agent_model,
+                model_settings={
+                    "temperature": self.config.context_agent_temperature,
+                    "max_tokens": self.config.context_agent_max_tokens,
+                },
+                metadata={
+                    "source_component": "ctx_bridge",
+                    "operation": "context_generation",
+                },
+            )
+            if asyncio.iscoroutine(provider_call):
+                result = await provider_call
+            else:
+                result = await self._agent.run(user_prompt)
             context = result.output.context
 
             # Track token usage if processor is registered
             if self.usage_processor:
                 try:
-                    await self.usage_processor(result.usage)
+                    usage = self._get_usage(result)
+                    if usage is not None:
+                        await self.usage_processor(usage)
                 except Exception as e:
                     logger.error(f"Error in usage processor: {e}", exc_info=True)
                     # Don't raise - continue with context generation
