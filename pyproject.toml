@@ -75,23 +75,24 @@ context-bridge = "context_bridge.__main__:main"
 packages = ["context_bridge"]
 
 [tool.pytest.ini_options]
+minversion = "7.4"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
-    "--cov=context_bridge",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
+    "--strict-markers",
+    "--tb=short",
     "-v",
 ]
+norecursedirs = ["scripts", "examples", "docs"]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "unit: marks tests as unit tests",
     "slow: marks tests as slow tests (deselect with '-m \"not slow\"')",
     "e2e: marks tests as end-to-end browser tests",
+    "manual: marks tests requiring manual interaction (not automated)",
 ]
 
 [tool.black]
@@ -157,7 +158,7 @@ module = ["crawl4ai.*", "streamlit.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["src/context_bridge"]
+source = ["context_bridge"]
 omit = ["*/tests/*", "*/__main__.py"]
 
 [tool.coverage.report]

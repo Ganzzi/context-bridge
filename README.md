@@ -40,7 +40,7 @@
 7. **Serves** via MCP (Model Context Protocol) for AI agent integration
 8. **Manages** through a Streamlit UI for human oversight
 
-### Current Version: v0.2.1
+### Current Version: v0.3.1
 
 **Latest Release**: December 1, 2025
 - ✅ **API Cleanup**: Removed 5 redundant methods, renamed `process_pages()` to `create_group()`
@@ -67,14 +67,7 @@
 - **Group Management**: Organize pages into named groups for batch processing
 - **Reprocessing**: Re-process groups with new settings (context generation, etc.)
 - **Usage Tracking**: Optional token usage monitoring for cost optimization
-### Technical Features
 
-- **Vector Search**: Powered by vector extension
-- **BM25 Full-Text Search**: Using vchord_bm25 extension
-- **Async/Await**: Fully asynchronous operations for scalability
-- **Configurable Embeddings**: Support for Ollama (local) and Google Gemini (cloud)
-- **Type-Safe**: Pydantic models for configuration and data validation
-- **Modular Design**: Clean separation of concerns (repositories, services, managers)
 
 ---
 
@@ -778,17 +771,17 @@ RELEASE_v0.2.1_SUMMARY.md    # Release documentation
 ### Running Tests
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
+# Install dependencies
+uv sync --all-groups --all-extras
+
+# Run PR-gated unit tests
+uv run pytest -m "not integration and not e2e" -q
 
 # Run all tests
-pytest
+uv run pytest -q
 
 # Run with coverage
-pytest --cov=context_bridge --cov-report=html
-
-# Run specific test file
-pytest tests/test_chunking_service.py -v
+uv run pytest -m "not integration and not e2e" --cov=context_bridge --cov-report=term-missing
 ```
 
 ### Code Quality
@@ -811,11 +804,10 @@ ruff check context_bridge
 Comprehensive technical guides are available in `docs/`:
 
 ### Testing & Quality Assurance
-- **[UI Testing Report](docs/ui_testing_report.md)** - Comprehensive Playwright testing results and bug fixes
 - **[MCP Server Usage Guide](docs/guide/MCP_SERVER_USAGE.md)** - How to use the MCP server with AI clients
 
 ### Technical Guides (`docs/technical/`)
-- **[API Reference](docs/API.md)** - Complete Python API documentation
+- **[API Reference](docs/api-reference.md)** - Complete Python API documentation
 - **[Knowledge Graph Storage Guide](docs/technical/knowledge-graph-storage-guide.md)** - Neo4j integration patterns
 - **[Usage Processor Guide](docs/technical/usage-processor-guide.md)** - Token usage tracking and cost monitoring
 - **[Crawl4AI Guide](docs/technical/crawl4ai_complete_guide.md)** - Complete crawling documentation
