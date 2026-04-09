@@ -102,7 +102,7 @@ class CrawlingService:
 
     async def crawl_webpage(
         self,
-        crawler: AsyncWebCrawler,
+        crawler: Optional[AsyncWebCrawler],
         url: str,
         depth: Optional[int] = None,
         follow_links: bool = True,
@@ -110,7 +110,8 @@ class CrawlingService:
         """Crawl a webpage with automatic type detection and dispatch.
 
         Args:
-            crawler: AsyncWebCrawler instance to use for crawling
+            crawler: Optional AsyncWebCrawler instance to use for crawling.
+                When None, this method provisions and closes its own crawler.
             url: URL to crawl
             depth: Optional override for max_depth from config (1-10)
             follow_links: Whether to follow internal links recursively
@@ -119,6 +120,15 @@ class CrawlingService:
             CrawlBatchResult: Results of the crawl operation
         """
         logger.info(f"Starting crawl for URL: {url}")
+
+        if crawler is None:
+            async with AsyncWebCrawler(verbose=True) as managed_crawler:
+                return await self.crawl_webpage(
+                    managed_crawler,
+                    url,
+                    depth=depth,
+                    follow_links=follow_links,
+                )
 
         try:
             # Validate URL first

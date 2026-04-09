@@ -88,15 +88,13 @@ class ContextGenerator:
 
         # Set up model provider with API keys from config
         api_keys = {}
-        if config.anthropic_api_key:
-            api_keys["anthropic"] = config.anthropic_api_key
-        if config.openai_api_key:
-            api_keys["openai"] = config.openai_api_key
-        if config.google_api_key:
-            api_keys["google"] = config.google_api_key
-        if config.grok_api_key:
-            api_keys["grok"] = config.grok_api_key
+        anthropic_key = getattr(config, "anthropic_api_key", None)
+        openai_key = getattr(config, "openai_api_key", None)
 
+        if anthropic_key:
+            api_keys["anthropic"] = anthropic_key
+        if openai_key:
+            api_keys["openai"] = openai_key
         self.model_provider = ModelProvider(
             api_keys,
             executor=executor,

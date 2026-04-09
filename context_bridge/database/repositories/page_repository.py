@@ -1,6 +1,7 @@
 from typing import Optional, List, Set, Tuple
 from datetime import datetime
 import logging
+import inspect
 from uuid import UUID
 from pydantic import BaseModel, Field
 
@@ -59,6 +60,14 @@ class PageRepository:
         self.db_manager = db_manager
         logger.debug("PageRepository initialized")
 
+    @staticmethod
+    async def _extract_rows(result: object) -> List[dict]:
+        """Extract row payload from driver result, supporting async mocks in tests."""
+        rows = result.result()  # type: ignore[attr-defined]
+        if inspect.isawaitable(rows):
+            rows = await rows
+        return rows or []
+
     async def create(
         self,
         document_id: int,
@@ -92,11 +101,7 @@ class PageRepository:
                 return existing_page.id
 
             # Create new page
-            query = """
-                INSERT INTO pages (document_id, url, content, content_hash, metadata)
-                VALUES ($1, $2, $3, $4, $5)
-                RETURNING id
-            """
+            query = "INSERT INTO pages (document_id, url, content, content_hash, metadata) VALUES ($1, $2, $3, $4, $5) RETURNING id"
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(
                     query, [document_id, url, content, content_hash, metadata or {}]
@@ -592,7 +597,7 @@ class PageRepository:
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, [str(group_id)])
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             pages = [self._row_to_page(row) for row in rows]
             logger.debug(f"Retrieved {len(pages)} pages for group {group_id}")
@@ -617,16 +622,11 @@ class PageRepository:
             Exception: If FK constraint violated or query fails
         """
         try:
-            query = """
-                UPDATE pages
-                SET group_id = $1
-                WHERE id = $2
-                RETURNING id
-            """
+            query = "UPDATE pages SET group_id = $1 WHERE id = $2 RETURNING id"
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, [str(group_id), page_id])
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             if rows:
                 logger.debug(f"Updated page {page_id} to group {group_id}")
@@ -653,16 +653,11 @@ class PageRepository:
             Exception: If query fails
         """
         try:
-            query = """
-                UPDATE pages
-                SET group_id = NULL
-                WHERE id = $1
-                RETURNING id
-            """
+            query = "UPDATE pages SET group_id = NULL WHERE id = $1 RETURNING id"
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, [page_id])
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             if rows:
                 logger.debug(f"Removed page {page_id} from group")
@@ -706,7 +701,7 @@ class PageRepository:
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, params)
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             pages = [self._row_to_page(row) for row in rows]
             logger.debug(

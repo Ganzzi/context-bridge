@@ -54,9 +54,6 @@
 
 ### Core Capabilities
 
-- **🕷️ Smart Crawling**: Automatically detect and crawl documentation sites, sitemaps, and text files
-### Technical Features
-
 - **Vector Search**: Powered by vector extension with cosine similarity
 - **BM25 Full-Text Search**: Using vchord_bm25 extension for keyword matching
 - **Hybrid Search**: Combines vector and BM25 with configurable weights
@@ -490,7 +487,7 @@ async def organize_documentation():
 - ✅ Re-process groups with new settings
 - ✅ Foundation for AI context generation (Phase 3)
 
-See [Groups System Guide](./docs/guides/groups_system_guide.md) for comprehensive documentation.
+See [Tags System Guide](./docs/guide/tags-system-guide.md) for related documentation.
 
 ### Chunking and Embedding
 
@@ -680,10 +677,6 @@ CREATE INDEX idx_chunks_document ON chunks(document_id);
 CREATE INDEX idx_chunks_group ON chunks(group_id);
 CREATE INDEX idx_chunks_vector ON chunks USING ivfflat(embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX idx_chunks_bm25 ON chunks USING bm25(bm25_vector bm25_ops);
-```ATE INDEX idx_chunks_document ON chunks(document_id);
-CREATE INDEX idx_chunks_group ON chunks(group_id);
-CREATE INDEX idx_chunks_vector ON chunks USING ivfflat(embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_chunks_bm25 ON chunks USING bm25(bm25_vector bm25_ops);
 ```
 
 ---
@@ -694,78 +687,26 @@ CREATE INDEX idx_chunks_bm25 ON chunks USING bm25(bm25_vector bm25_ops);
 
 ```
 context_bridge/               # Core package
-├── __init__.py
 ├── config.py                 # Configuration management
 ├── core.py                   # Main ContextBridge API
-├── database/
-│   ├── init_databases.py     # Database initialization
-│   └── postgres_manager.py   # Connection pool manager
-├── schema/
-│   └── extensions.sql        # PostgreSQL extensions & schema
-├── repositories/             # Data access layer
-│   ├── document_repository.py
-│   ├── page_repository.py
-│   ├── group_repository.py
-│   └── chunk_repository.py
-├── service/                  # Business logic layer
-│   ├── crawling_service.py
-│   ├── chunking_service.py
-│   ├── embedding.py
-│   ├── search_service.py
-│   ├── url_service.py
-│   └── reprocessing_service.py
-└── database/
-    └── models/
-        ├── group_models.py
-        └── tag_models.py
+├── database/                 # Database layer
+│   ├── init_databases.py     # Schema initialization
+│   ├── postgres_manager.py   # Connection pool
+│   ├── schema/               # SQL migrations
+│   ├── repositories/         # Data access (documents, pages, chunks, groups)
+│   └── models/               # Pydantic models
+├── service/                  # Business logic
+│   ├── crawling_service.py   # Web crawling
+│   ├── chunking_service.py   # Content chunking
+│   ├── embedding.py          # Vector embeddings
+│   ├── search_service.py     # Hybrid search
+│   └── agents/               # AI agent integrations
 
-context_bridge_mcp/          # MCP Server (Model Context Protocol)
-├── __init__.py
-├── server.py                 # MCP server implementation
-├── schemas.py                # Tool input/output schemas
-└── __main__.py               # CLI entry point
-
-streamlit_app/               # Streamlit Web UI
-├── __init__.py
-├── app.py                    # Main application
-├── pages/                    # Multi-page navigation
-│   ├── documents.py          # Document management
-│   ├── crawled_pages.py      # Page management
-│   └── search.py             # Search interface
-├── components/               # Reusable UI components
-├── utils/                    # UI utilities and helpers
-└── README.md                 # UI-specific documentation
-
+context_bridge_mcp/          # MCP Server
+streamlit_app/               # Web UI
+tests/                       # Test suite (unit/integration/e2e)
 docs/                        # Documentation
-├── API.md                   # Complete API reference
-├── ARCHITECTURE.md          # System architecture
-├── guide/                   # User guides
-├── plan/                    # Development plans
-├── technical/               # Technical guides
-│   ├── knowledge-graph-storage-guide.md
-│   ├── usage-processor-guide.md
-│   ├── crawl4ai_complete_guide.md
-│   ├── embedding_service.md
-│   ├── psqlpy-complete-guide.md
-│   ├── python_mcp_server_guide.md
-│   ├── python-testing-guide.md
-│   └── smart_chunk_markdown_algorithm.md
-└── memory_templates.yaml    # Memory usage templates
-
-tests/                       # Test suite
-├── conftest.py
-├── integration/
-├── unit/
-└── e2e/                     # End-to-end tests
-    ├── conftest.py
-    └── test_streamlit_ui.py
-
 scripts/                     # Utility scripts
-├── create_test_data.py      # Generate test data
-└── test_context_bridge.py   # Integration tests
-
-RELEASE_v0.2.1_SUMMARY.md    # Release documentation
-```
 ```
 
 ### Running Tests
@@ -788,37 +729,33 @@ uv run pytest -m "not integration and not e2e" --cov=context_bridge --cov-report
 
 ```bash
 # Format code
-black context_bridge tests
+uv run black context_bridge tests
 
 # Type checking
-mypy context_bridge
+uv run mypy context_bridge
 
 # Linting
-ruff check context_bridge
+uv run ruff check context_bridge
 ```
 
 ---
 
-## 📖 Technical Documentation
+## 📖 Documentation
 
-Comprehensive technical guides are available in `docs/`:
-
-### Testing & Quality Assurance
-- **[MCP Server Usage Guide](docs/guide/MCP_SERVER_USAGE.md)** - How to use the MCP server with AI clients
+- **[API Reference](docs/api-reference.md)** - Complete Python API documentation
+- **[Architecture](docs/ARCHITECTURE.md)** - System design and components
+- **[Development Guide](docs/development.md)** - Setup, testing, and contribution
+- **[MCP Server Guide](docs/guide/MCP_SERVER_USAGE.md)** - MCP server usage
+- **[Tags System Guide](docs/guide/tags-system-guide.md)** - Tag management workflow
 
 ### Technical Guides (`docs/technical/`)
-- **[API Reference](docs/api-reference.md)** - Complete Python API documentation
 - **[Knowledge Graph Storage Guide](docs/technical/knowledge-graph-storage-guide.md)** - Neo4j integration patterns
 - **[Usage Processor Guide](docs/technical/usage-processor-guide.md)** - Token usage tracking and cost monitoring
 - **[Crawl4AI Guide](docs/technical/crawl4ai_complete_guide.md)** - Complete crawling documentation
 - **[Embedding Service](docs/technical/embedding_service.md)** - Ollama and Gemini embedding setup
 - **[PSQLPy Guide](docs/technical/psqlpy-complete-guide.md)** - PostgreSQL driver usage
 - **[MCP Server Guide](docs/technical/python_mcp_server_guide.md)** - MCP server implementation
-- **[Testing Guide](docs/technical/python-testing-guide.md)** - Testing best practices
 - **[Smart Chunking Algorithm](docs/technical/smart_chunk_markdown_algorithm.md)** - Chunking implementation
-
-### Implementation Plans (`docs/plan/`)
-- **[UI & MCP Implementation Plan](docs/plan/ui_and_mcp_implementation_plan.md)** - Development roadmap and progress
 
 ---
 

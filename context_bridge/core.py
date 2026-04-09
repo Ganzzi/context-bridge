@@ -581,7 +581,7 @@ class ContextBridge:
 
     async def list_groups(
         self, document_id: Optional[int] = None, limit: int = 100, offset: int = 0
-    ) -> List[GroupInfo]:
+    ) -> List[Dict[str, Any]]:
         """
         List groups for a document or all groups across all documents.
 
@@ -620,8 +620,8 @@ class ContextBridge:
                 document_id=document_id, limit=limit, offset=offset
             )
 
-        # Convert Group models to GroupInfo
-        return [GroupInfo.from_group(group) for group in all_groups]
+        # Return dictionaries for backward compatibility with existing callers/tests.
+        return [GroupInfo.from_group(group).model_dump() for group in all_groups]
 
     async def get_group_stats(self, group_id: UUID) -> GroupStats:
         """
@@ -704,6 +704,7 @@ class ContextBridge:
         self,
         document_id: int,
         page_ids: List[int],
+        name: Optional[str] = None,
         chunk_size: Optional[int] = None,
         context_enabled: bool = False,
         context_model: Optional[str] = None,
@@ -764,13 +765,40 @@ class ContextBridge:
             ```
         """
         self._check_initialized()
-        # Note: context_enabled and context_model are accepted but not yet
-        # forwarded to process_chunking. Use reprocess_group() for context generation.
+        effective_context_model = context_model or self.config.context_agent_model
+
+        # `name` is currently accepted for API compatibility and future use.
+        _ = name
+
         return await self._doc_manager.process_chunking(
             document_id=document_id,
             page_ids=page_ids,
             chunk_size=chunk_size,
+            context_enabled=context_enabled,
+            context_model=effective_context_model,
             run_async=True,  # Always async in background
+        )
+
+    async def process_pages(
+        self,
+        document_id: int,
+        page_ids: List[int],
+        chunk_size: Optional[int] = None,
+        context_enabled: bool = False,
+        context_model: Optional[str] = None,
+    ) -> ChunkProcessingResult:
+        """Backward-compatible alias for `create_group()`.
+
+        Historically, `process_pages` was the public API for triggering
+        chunking. Keep this method so existing integrations and tests continue
+        to work while routing through the newer group-oriented implementation.
+        """
+        return await self.create_group(
+            document_id=document_id,
+            page_ids=page_ids,
+            chunk_size=chunk_size,
+            context_enabled=context_enabled,
+            context_model=context_model,
         )
 
     async def list_reprocessable_groups(

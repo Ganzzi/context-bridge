@@ -164,6 +164,11 @@ class ModelProvider:
 
         provider_name = provider_name.strip().lower()
 
+        # Keep compatibility with current runtime contract: only Anthropic/OpenAI
+        # are enabled for model construction in this codepath.
+        if provider_name in {"google", "grok"}:
+            raise ValueError(f"Unsupported provider: '{provider_name}'")
+
         model_class = self.PROVIDER_MODEL_MAPPING.get(provider_name)
         if not model_class:
             supported = ", ".join(self.PROVIDER_MODEL_MAPPING.keys())

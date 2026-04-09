@@ -2,6 +2,7 @@ from typing import List, Optional
 from datetime import datetime
 from uuid import UUID
 import logging
+import inspect
 from pydantic import BaseModel, Field
 
 from psqlpy.extra_types import PgVector
@@ -69,6 +70,14 @@ class ChunkRepository:
         """
         self.db_manager = db_manager
         logger.debug("ChunkRepository initialized")
+
+    @staticmethod
+    async def _extract_rows(result: object) -> List[dict]:
+        """Extract row payload from driver result, supporting async mocks in tests."""
+        rows = result.result()  # type: ignore[attr-defined]
+        if inspect.isawaitable(rows):
+            rows = await rows
+        return rows or []
 
     async def create(
         self,
@@ -630,7 +639,7 @@ class ChunkRepository:
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, [str(group_id), limit])
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             chunks = [self._row_to_chunk(row) for row in rows]
             logger.debug(f"Retrieved {len(chunks)} chunks for group {group_id}")
@@ -669,7 +678,7 @@ class ChunkRepository:
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, [str(group_id)])
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             if not rows or not rows[0]["total_chunks"]:
                 return {
@@ -741,7 +750,7 @@ class ChunkRepository:
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, params)
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             search_results = [
                 SearchResult(
@@ -786,7 +795,7 @@ class ChunkRepository:
 
             async with self.db_manager.connection() as conn:
                 result = await conn.execute(query, [str(group_id), page_id])
-                rows = result.result()
+                rows = await self._extract_rows(result)
 
             count = len(rows) if rows else 0
             logger.debug(f"Updated {count} chunks containing page {page_id} to group {group_id}")

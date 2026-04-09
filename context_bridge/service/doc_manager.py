@@ -13,7 +13,7 @@ import traceback
 from uuid import uuid4, UUID
 
 from pydantic import BaseModel
-from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import CrawlerRunConfig
 
 from context_bridge.config import Config
 from context_bridge.database.postgres_manager import PostgreSQLManager
@@ -161,17 +161,17 @@ class DocManager:
             should_follow_links = False
         # Note: Fragment duplication is prevented by URL normalization in crawling_service
 
-        # Crawl all URLs
-        async with AsyncWebCrawler(verbose=True) as crawler:
-            all_crawl_results = []
-            for url in urls_to_crawl:
-                logger.info(
-                    f"Crawling URL: {url} (follow_links={should_follow_links}, depth={max_depth or self.config.crawl_max_depth})"
-                )
-                crawl_result = await self.crawling_service.crawl_webpage(
-                    crawler, url, depth=max_depth, follow_links=should_follow_links
-                )
-                all_crawl_results.append(crawl_result)
+        # Crawl all URLs. Let CrawlingService decide how to provision crawler
+        # resources (this keeps unit tests free of Playwright/browser deps).
+        all_crawl_results = []
+        for url in urls_to_crawl:
+            logger.info(
+                f"Crawling URL: {url} (follow_links={should_follow_links}, depth={max_depth or self.config.crawl_max_depth})"
+            )
+            crawl_result = await self.crawling_service.crawl_webpage(
+                None, url, depth=max_depth, follow_links=should_follow_links
+            )
+            all_crawl_results.append(crawl_result)
 
         # Combine all results
         combined_results = []
@@ -285,6 +285,8 @@ class DocManager:
         document_id: int,
         page_ids: List[int],
         chunk_size: Optional[int] = None,
+        context_enabled: bool = False,
+        context_model: Optional[str] = None,
         batch_enabled: bool = True,
         run_async: bool = True,
     ) -> ChunkProcessingResult:
@@ -302,13 +304,19 @@ class DocManager:
             document_id: Document ID
             page_ids: List of page IDs to process
             chunk_size: Optional chunk size override
+            context_enabled: Reserved for compatibility; context generation is
+                currently applied via group processing/reprocessing flows.
+            context_model: Reserved for compatibility with core API.
             batch_enabled: Whether to use batch processing for embeddings
             run_async: If True, run in background task. If False, run synchronously.
 
         Returns:
             ChunkProcessingResult with processing details
         """
-        logger.info(f"Starting process_chunking for doc {document_id}, {len(page_ids)} pages")
+        logger.info(
+            f"Starting process_chunking for doc {document_id}, {len(page_ids)} pages "
+            f"(context_enabled={context_enabled}, context_model={context_model})"
+        )
 
         chunk_size = chunk_size or self.config.chunk_size
         min_size = self.config.min_combined_content_size
@@ -554,9 +562,9 @@ class DocManager:
             if context_enabled and context_model:
                 context_agent = ContextGenerator(
                     self.config,
-                    usage_processor=self.usage_processor,
-                    executor=self.llm_executor,
-                    backend_mode=self.llm_backend_mode,
+                    usage_processor=getattr(self, "usage_processor", None),
+                    executor=getattr(self, "llm_executor", None),
+                    backend_mode=getattr(self, "llm_backend_mode", False),
                 )
                 logger.info(f"🤖 Initialized context agent with model {context_model}")
 

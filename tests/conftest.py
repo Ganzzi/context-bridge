@@ -22,6 +22,24 @@ from context_bridge.database.repositories.page_repository import PageRepository,
 from context_bridge.database.repositories.chunk_repository import ChunkRepository, Chunk
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Apply test markers consistently based on file path.
+
+    This keeps PR-gated runs deterministic with:
+    `pytest -m "not integration and not e2e"`.
+    """
+    for item in items:
+        path = str(item.fspath).replace("\\", "/")
+
+        if "/tests/e2e/" in path:
+            item.add_marker(pytest.mark.e2e)
+        elif "/tests/unit/" in path:
+            item.add_marker(pytest.mark.unit)
+        elif "/tests/integration/" in path or "/tests/" in path:
+            # Root-level tests in this repo are integration-oriented/manual-heavy.
+            item.add_marker(pytest.mark.integration)
+
+
 # Configuration Fixtures
 
 

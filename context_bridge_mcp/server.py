@@ -124,7 +124,7 @@ async def _handle_find_documents(
     """Handle find_documents tool call."""
     try:
         # Extract parameters from arguments
-        query = arguments["query"]
+        query = arguments.get("query", "")
         limit = arguments.get("limit", 10)
 
         # Get documents
@@ -135,6 +135,7 @@ async def _handle_find_documents(
             response = {
                 "documents": [],
                 "count": 0,
+                "message": "No documents found",
             }
         else:
             # Compact format to reduce token usage
@@ -144,8 +145,9 @@ async def _handle_find_documents(
                         "id": doc.id,
                         "name": doc.name,
                         "version": doc.version,
-                        "description": doc.description or "",
+                        "description": doc.description,
                         "source_url": doc.source_url or "",
+                        "created_at": doc.created_at.isoformat(),
                         "tags": doc.tags,  # List of tag names (not IDs) for readability
                     }
                     for doc in documents
@@ -157,7 +159,7 @@ async def _handle_find_documents(
     except Exception as e:
         logger.error(f"Error executing find_documents: {e}", exc_info=True)
         error_response = {
-            "error": str(e),
+            "error": f"Error executing find_documents: {str(e)}",
             "documents": [],
             "count": 0,
         }
