@@ -7,10 +7,11 @@ collections of pages processed together for chunking and context generation.
 
 import logging
 from uuid import UUID
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime
+from contextlib import asynccontextmanager
 
-from psqlpy import ConnectionPool
+from psqlpy import ConnectionPool, Connection
 
 from context_bridge.database.models.group_models import (
     Group,
@@ -40,6 +41,34 @@ class GroupRepository:
         """
         self.pool = connection_pool
 
+    @asynccontextmanager
+    async def connection(self) -> AsyncGenerator[Connection, None]:
+        """
+        Get a connection from the pool (context manager).
+
+        Handles both PostgreSQLManager (returns @asynccontextmanager) and
+        raw psqlpy ConnectionPool (returns a coroutine) transparently.
+
+        Usage:
+            async with repository.connection() as conn:
+                result = await conn.fetch("SELECT * FROM table")
+
+        Yields:
+            Connection from the pool
+        """
+        result = self.pool.connection()
+        if hasattr(result, '__aenter__'):
+            # PostgreSQLManager returns an async context manager
+            async with result as conn:
+                yield conn
+        else:
+            # Raw ConnectionPool.connection() returns a coroutine
+            conn = await result
+            try:
+                yield conn
+            finally:
+                pass  # Connection auto-returns to pool
+
     # CRUD Operations
 
     async def create_group(self, group_data: GroupCreate) -> Group:
@@ -58,7 +87,7 @@ class GroupRepository:
         """
         logger.debug(f"Creating group for document {group_data.document_id}")
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             # Verify document exists
             doc_check = await conn.fetch(
                 "SELECT id FROM documents WHERE id = $1", [group_data.document_id]
@@ -124,7 +153,7 @@ class GroupRepository:
         """
         logger.debug(f"Getting group {group_id}")
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             result = await conn.fetch(
                 """
                 SELECT id, document_id, name, description, context_enabled, context_model,
@@ -210,7 +239,7 @@ class GroupRepository:
         query += f" ORDER BY created_at DESC LIMIT ${param_index} OFFSET ${param_index + 1}"
         params.extend([limit, offset])
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             results = await conn.fetch(query, params)
 
             groups = []
@@ -318,7 +347,7 @@ class GroupRepository:
                       processed_at, processing_status, metadata
         """
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             result = await conn.fetch(query, params)
 
             rows = result.result()
@@ -359,7 +388,7 @@ class GroupRepository:
         """
         logger.debug(f"Deleting group {group_id}")
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             result = await conn.execute("DELETE FROM groups WHERE id = $1", [group_id])
 
             # Check if any rows were deleted
@@ -385,7 +414,7 @@ class GroupRepository:
         """
         logger.debug(f"Getting statistics for group {group_id}")
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             # Get group info
             group_result = await conn.fetch("SELECT id FROM groups WHERE id = $1", [group_id])
 
@@ -456,7 +485,7 @@ class GroupRepository:
         """
         logger.debug(f"Counting groups for document {document_id}")
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             result = await conn.fetch(
                 "SELECT COUNT(*) as count FROM groups WHERE document_id = $1", [document_id]
             )
@@ -497,7 +526,7 @@ class GroupRepository:
 
         query += " ORDER BY created_at DESC"
 
-        async with self.pool.connection() as conn:
+        async with self.connection() as conn:
             results = await conn.fetch(query, params)
 
             groups = []
