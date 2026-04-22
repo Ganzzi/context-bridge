@@ -126,7 +126,7 @@ class ReprocessingService:
             logger.debug(f"Combined content length: {len(combined_content)} characters")
 
             # Step 6: Chunk the content
-            chunks = await self.chunking_service.chunk_markdown(
+            chunks = self.chunking_service.smart_chunk_markdown(
                 combined_content,
                 chunk_size=self.config.chunk_size,
             )
@@ -137,19 +137,19 @@ class ReprocessingService:
             if context_enabled and self.context_agent:
                 logger.info(f"Generating contexts for {len(chunks)} chunks")
                 contexts = await self.context_agent.generate_contexts_batch(
-                    chunks=[c.content for c in chunks],
+                    chunks=chunks,
                     document_content=combined_content,
                 )
                 logger.debug(f"Generated {len([c for c in contexts if c])} non-empty contexts")
 
                 # Prepend context to chunk content
-                for i, chunk in enumerate(chunks):
-                    if i < len(contexts) and contexts[i]:
-                        chunk.content = f"{contexts[i]}\n\n{chunk.content}"
+                chunks = [
+                    f"{contexts[i]}\n\n{chunk}" if i < len(contexts) and contexts[i] else chunk
+                    for i, chunk in enumerate(chunks)
+                ]
 
             # Step 8: Generate embeddings
-            chunk_contents = [c.content for c in chunks]
-            embeddings = await self.embedding_service.embed_batch(chunk_contents)
+            embeddings = await self.embedding_service.get_embeddings_batch(chunks)
             logger.info(f"Generated embeddings for {len(embeddings)} chunks")
 
             # Step 9: Store chunks with metadata
@@ -370,12 +370,12 @@ class ReprocessingService:
                     continue
 
                 # Store chunk via repository
-                await self.chunk_repo.create_chunk(
-                    document_id=None,  # Will be fetched from group
-                    group_id=group_id,
-                    content=chunk.content,
+                await self.chunk_repo.create(
+                    document_id=0,
+                    chunk_index=i,
+                    content=chunk if isinstance(chunk, str) else chunk.content,
                     embedding=embedding,
-                    source_page_ids=[],  # Will be populated from pages
+                    group_id=group_id,
                 )
                 stored_count += 1
 

@@ -22,15 +22,18 @@ from context_bridge.database.models.group_models import Group, ProcessingStatus
 def mock_db_manager():
     """Mock PostgreSQLManager"""
     manager = MagicMock()
-    manager.connection.return_value.__aenter__ = AsyncMock()
-    manager.connection.return_value.__aexit__ = AsyncMock(return_value=None)
+    mock_conn = AsyncMock()
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=None)
+    manager.connection = MagicMock(return_value=mock_conn)
     return manager
 
 
 @pytest.fixture
 def mock_chunking_service():
     """Mock ChunkingService"""
-    service = AsyncMock()
+    service = MagicMock()
+    service.smart_chunk_markdown = MagicMock(return_value=["Chunk 1", "Chunk 2"])
     return service
 
 
@@ -38,26 +41,29 @@ def mock_chunking_service():
 def mock_embedding_service():
     """Mock EmbeddingService"""
     service = AsyncMock()
-    service.embed.return_value = [0.1] * 768
+    service.get_embeddings_batch = AsyncMock(return_value=[[0.1] * 768, [0.2] * 768])
     return service
-
-
-@pytest.fixture
-def mock_context_agent():
-    """Mock ContextGenerationAgent"""
-    agent = AsyncMock()
-    agent.generate_context.return_value = "Generated context"
-    return agent
 
 
 @pytest.fixture
 def mock_config():
     """Mock Config"""
     config = MagicMock()
+    config.chunk_size = 2000
     config.anthropic_api_key = "test-key"
     config.openai_api_key = "test-key"
     config.embedding_dimension = 768
     return config
+
+
+def _make_mock_page(page_id, content, title="Test Page"):
+    """Create a mock Page object."""
+    page = MagicMock()
+    page.id = page_id
+    page.content = content
+    page.title = title
+    page.document_id = 1
+    return page
 
 
 class TestReprocessingCoreAPI:
@@ -74,7 +80,6 @@ class TestReprocessingCoreAPI:
         """Test successful group reprocessing"""
         group_id = UUID("550e8400-e29b-41d4-a716-446655440000")
 
-        # Create service with mocks
         service = ReprocessingService(
             db_manager=mock_db_manager,
             chunking_service=mock_chunking_service,
@@ -96,32 +101,29 @@ class TestReprocessingCoreAPI:
 
         service.group_repo.get_group_by_id = AsyncMock(return_value=group)
         service.group_repo.update_group = AsyncMock(return_value=True)
-        service.page_repo.list_pages = AsyncMock(
+        service.page_repo.get_pages_for_group = AsyncMock(
             return_value=[
-                {"id": 1, "content": "Page 1"},
-                {"id": 2, "content": "Page 2"},
+                _make_mock_page(1, "Page 1 content", "Page 1"),
+                _make_mock_page(2, "Page 2 content", "Page 2"),
             ]
         )
         service.chunk_repo.delete_by_group = AsyncMock(return_value=5)
-        service.chunk_repo.create_batch = AsyncMock(return_value=[10, 11])
-        service.chunking_service.smart_chunk_markdown = AsyncMock(
-            return_value=[
-                {"index": 0, "content": "Chunk 1"},
-                {"index": 1, "content": "Chunk 2"},
-            ]
+        service.chunk_repo.create = AsyncMock(return_value=10)
+        service.chunking_service.smart_chunk_markdown = MagicMock(
+            return_value=["Chunk 1", "Chunk 2"]
         )
-        service.embedding_service.embed = AsyncMock(return_value=[0.1] * 768)
+        service.embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1] * 768, [0.2] * 768]
+        )
 
-        # Perform reprocessing
         result = await service.reprocess_group(
             group_id=group_id,
             context_model="anthropic:claude-3-5-sonnet-20241022",
             force_delete_chunks=True,
         )
 
-        # Assertions
-        assert result["success"] is True
-        assert result["chunks_stored"] >= 0
+        assert result["status"] == "success"
+        assert result["chunks_created"] >= 0
         service.group_repo.get_group_by_id.assert_called()
         service.group_repo.update_group.assert_called()
 
@@ -145,14 +147,11 @@ class TestReprocessingCoreAPI:
 
         service.group_repo.get_group_by_id = AsyncMock(return_value=None)
 
-        # Attempt reprocessing
-        result = await service.reprocess_group(
-            group_id=group_id,
-            context_model="anthropic:claude-3-5-sonnet-20241022",
-        )
-
-        # Should fail
-        assert result["success"] is False
+        with pytest.raises(RuntimeError, match="Group .* not found"):
+            await service.reprocess_group(
+                group_id=group_id,
+                context_model="anthropic:claude-3-5-sonnet-20241022",
+            )
 
     @pytest.mark.asyncio
     async def test_list_reprocessable_groups(
@@ -172,7 +171,6 @@ class TestReprocessingCoreAPI:
             config=mock_config,
         )
 
-        # Mock groups
         groups = [
             Group(
                 id=UUID("550e8400-e29b-41d4-a716-446655440000"),
@@ -196,16 +194,14 @@ class TestReprocessingCoreAPI:
             ),
         ]
 
-        service.group_repo.list_groups_by_document = AsyncMock(return_value=groups)
+        service.group_repo.list_groups = AsyncMock(return_value=groups)
 
-        # List reprocessable groups
         result = await service.list_reprocessable_groups(document_id=document_id)
 
-        # Assertions
         assert len(result) == 2
-        assert result[0].name == "Group 1"
-        assert result[1].name == "Group 2"
-        service.group_repo.list_groups_by_document.assert_called_once()
+        assert result[0]["name"] == "Group 1"
+        assert result[1]["name"] == "Group 2"
+        service.group_repo.list_groups.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_batch_reprocessing(
@@ -228,7 +224,6 @@ class TestReprocessingCoreAPI:
             UUID("660e8400-e29b-41d4-a716-446655440001"),
         ]
 
-        # Mock groups
         groups = {
             group_ids[0]: Group(
                 id=group_ids[0],
@@ -257,31 +252,27 @@ class TestReprocessingCoreAPI:
 
         service.group_repo.get_group_by_id = AsyncMock(side_effect=get_group_side_effect)
         service.group_repo.update_group = AsyncMock(return_value=True)
-        service.page_repo.list_pages = AsyncMock(
-            return_value=[
-                {"id": 1, "content": "Page 1"},
-            ]
+        service.page_repo.get_pages_for_group = AsyncMock(
+            return_value=[_make_mock_page(1, "Page 1 content", "Page 1")]
         )
         service.chunk_repo.delete_by_group = AsyncMock(return_value=5)
-        service.chunk_repo.create_batch = AsyncMock(return_value=[10])
-        service.chunking_service.smart_chunk_markdown = AsyncMock(
-            return_value=[
-                {"index": 0, "content": "Chunk 1"},
-            ]
+        service.chunk_repo.create = AsyncMock(return_value=10)
+        service.chunking_service.smart_chunk_markdown = MagicMock(
+            return_value=["Chunk 1"]
         )
-        service.embedding_service.embed = AsyncMock(return_value=[0.1] * 768)
+        service.embedding_service.get_embeddings_batch = AsyncMock(
+            return_value=[[0.1] * 768]
+        )
 
-        # Perform batch reprocessing
         results = await service.reprocess_multiple_groups(
             group_ids=group_ids,
             context_model="anthropic:claude-3-5-sonnet-20241022",
             continue_on_error=True,
         )
 
-        # Assertions
-        assert len(results) == 2
-        assert results[0]["success"] is True
-        assert results[1]["success"] is True
+        assert results["total_groups"] == 2
+        assert results["successful"] == 2
+        assert len(results["group_results"]) == 2
 
     @pytest.mark.asyncio
     async def test_filters_context_enabled_groups(
@@ -301,7 +292,6 @@ class TestReprocessingCoreAPI:
             config=mock_config,
         )
 
-        # Mix of context-enabled and non-context-enabled groups
         all_groups = [
             Group(
                 id=UUID("550e8400-e29b-41d4-a716-446655440000"),
@@ -325,12 +315,10 @@ class TestReprocessingCoreAPI:
             ),
         ]
 
-        service.group_repo.list_groups_by_document = AsyncMock(return_value=all_groups)
+        service.group_repo.list_groups = AsyncMock(return_value=all_groups)
 
-        # List reprocessable groups
         result = await service.list_reprocessable_groups(document_id=document_id)
 
-        # Only non-context-enabled groups should be returned
         assert len(result) == 1
-        assert result[0].name == "No Context"
-        assert result[0].context_enabled is False
+        assert result[0]["name"] == "No Context"
+        assert result[0]["context_enabled"] is False

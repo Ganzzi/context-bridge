@@ -146,7 +146,7 @@ class TestProcessGroupWithContext:
         doc_manager.chunk_repo.create_batch.return_value = [1, 2]
         doc_manager.chunk_repo.prepend_context_to_chunk.return_value = True
 
-        with patch("context_bridge.service.doc_manager.ContextGenerationAgent") as mock_agent_class:
+        with patch("context_bridge.service.doc_manager.ContextGenerator") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.generate_contexts_batch.return_value = [
                 "Context for chunk 1",
@@ -164,7 +164,12 @@ class TestProcessGroupWithContext:
             assert result["chunks_created"] == 2
 
             # Verify context agent was created
-            mock_agent_class.assert_called_once_with(doc_manager.config)
+            mock_agent_class.assert_called_once_with(
+                doc_manager.config,
+                usage_processor=None,
+                executor=None,
+                backend_mode=False,
+            )
 
             # Verify context generation was called
             mock_agent.generate_contexts_batch.assert_called_once()
@@ -197,7 +202,7 @@ class TestProcessGroupWithContext:
         ]
         doc_manager.chunk_repo.create_batch.return_value = [1, 2, 3]
 
-        with patch("context_bridge.service.doc_manager.ContextGenerationAgent") as mock_agent_class:
+        with patch("context_bridge.service.doc_manager.ContextGenerator") as mock_agent_class:
             mock_agent = AsyncMock()
             # Some contexts succeed, one fails (empty)
             mock_agent.generate_contexts_batch.return_value = [
@@ -249,7 +254,7 @@ class TestProcessGroupWithContext:
         doc_manager.chunk_repo.create_batch.return_value = [1]
         doc_manager.chunk_repo.prepend_context_to_chunk.return_value = True
 
-        with patch("context_bridge.service.doc_manager.ContextGenerationAgent") as mock_agent_class:
+        with patch("context_bridge.service.doc_manager.ContextGenerator") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.generate_contexts_batch.return_value = ["Context"]
             mock_agent_class.return_value = mock_agent
@@ -297,7 +302,7 @@ class TestProcessGroupWithContext:
         doc_manager.embedding_service.get_embeddings_batch.return_value = [[0.1]]
         doc_manager.chunk_repo.create_batch.return_value = [1]
 
-        with patch("context_bridge.service.doc_manager.ContextGenerationAgent") as mock_agent_class:
+        with patch("context_bridge.service.doc_manager.ContextGenerator") as mock_agent_class:
             mock_agent = AsyncMock()
             # Simulate LLM error
             mock_agent.generate_contexts_batch.side_effect = Exception("LLM API Error")
@@ -407,7 +412,7 @@ class TestContextGenerationIntegration:
         doc_manager.chunk_repo.create_batch.return_value = [1, 2]
         doc_manager.chunk_repo.prepend_context_to_chunk.return_value = True
 
-        with patch("context_bridge.service.doc_manager.ContextGenerationAgent") as mock_agent_class:
+        with patch("context_bridge.service.doc_manager.ContextGenerator") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.generate_contexts_batch.return_value = [
                 "This section introduces the API",

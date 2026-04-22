@@ -159,6 +159,7 @@ def test_mcp_inspector_integration():
     assert True, "MCP Inspector integration tested manually"
 
 
+@pytest.mark.manual
 def test_server_startup_validation():
     """Test that the MCP server can be started (basic validation)."""
     tester = MCPInspectorTester()
@@ -175,6 +176,7 @@ def test_server_startup_validation():
         tester.stop_server()
 
 
+@pytest.mark.manual
 def test_server_process_management():
     """Test server process management."""
     tester = MCPInspectorTester()
