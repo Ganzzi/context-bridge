@@ -1,6 +1,8 @@
 # Context Bridge - Streamlit UI
 
-**Version:** 0.1.0  
+> **Note:** This Streamlit app is provided for demo/debugging purposes and is **not actively maintained**. It may not reflect the latest API changes in the core `context_bridge` package. Use at your own risk.
+
+**Version:** 0.1.0
 **Last Updated:** October 13, 2025
 
 A web-based interface for managing documentation in the Context Bridge RAG (Retrieval-Augmented Generation) system.
