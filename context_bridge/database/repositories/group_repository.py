@@ -93,14 +93,14 @@ class GroupRepository:
                 "SELECT id FROM documents WHERE id = $1", [group_data.document_id]
             )
 
-            if not doc_check:
+            if not doc_check.result():
                 raise ValueError(f"Document with ID {group_data.document_id} not found")
 
             # Create group
             query = """
-                INSERT INTO groups 
-                (document_id, name, description, context_enabled, context_model, processing_status)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO groups
+                (document_id, name, description, context_enabled, context_model, processing_status, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING id, document_id, name, description, context_enabled, context_model,
                           combined_content_length, total_pages, total_chunks, created_at,
                           processed_at, processing_status, metadata
@@ -115,6 +115,7 @@ class GroupRepository:
                     group_data.context_enabled,
                     group_data.context_model,
                     ProcessingStatus.PENDING.value,
+                    group_data.metadata or {},
                 ],
             )
 
@@ -138,7 +139,7 @@ class GroupRepository:
                 created_at=row["created_at"],
                 processed_at=row["processed_at"],
                 processing_status=ProcessingStatus(row["processing_status"]),
-                metadata=row["metadata"],
+                metadata=row["metadata"] or {},
             )
 
     async def get_group_by_id(self, group_id: UUID) -> Optional[Group]:
@@ -183,7 +184,7 @@ class GroupRepository:
                 created_at=row["created_at"],
                 processed_at=row["processed_at"],
                 processing_status=ProcessingStatus(row["processing_status"]),
-                metadata=row["metadata"],
+                metadata=row["metadata"] or {},
             )
 
     async def list_groups(
@@ -258,7 +259,7 @@ class GroupRepository:
                         created_at=row["created_at"],
                         processed_at=row["processed_at"],
                         processing_status=ProcessingStatus(row["processing_status"]),
-                        metadata=row["metadata"],
+                        metadata=row["metadata"] or {},
                     )
                 )
 
@@ -370,7 +371,7 @@ class GroupRepository:
                 created_at=row["created_at"],
                 processed_at=row["processed_at"],
                 processing_status=ProcessingStatus(row["processing_status"]),
-                metadata=row["metadata"],
+                metadata=row["metadata"] or {},
             )
 
     async def delete_group(self, group_id: UUID) -> bool:
@@ -389,11 +390,10 @@ class GroupRepository:
         logger.debug(f"Deleting group {group_id}")
 
         async with self.connection() as conn:
-            result = await conn.execute("DELETE FROM groups WHERE id = $1", [group_id])
+            result = await conn.fetch("DELETE FROM groups WHERE id = $1 RETURNING id", [group_id])
 
-            # Check if any rows were deleted
-            # execute returns QueryResult, result() returns string like "DELETE 1"
-            deleted = result.result() != "DELETE 0"
+            rows = result.result()
+            deleted = len(rows) > 0
 
             if deleted:
                 logger.info(f"Deleted group {group_id}")
@@ -545,7 +545,7 @@ class GroupRepository:
                         created_at=row["created_at"],
                         processed_at=row["processed_at"],
                         processing_status=ProcessingStatus(row["processing_status"]),
-                        metadata=row["metadata"],
+                        metadata=row["metadata"] or {},
                     )
                 )
 

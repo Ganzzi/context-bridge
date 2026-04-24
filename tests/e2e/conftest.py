@@ -1,6 +1,7 @@
 """Pytest configuration for end-to-end browser tests."""
 
 import asyncio
+import shutil
 import subprocess
 import time
 from typing import AsyncIterator, Iterator
@@ -13,6 +14,9 @@ from playwright.sync_api import Page, expect
 def streamlit_server():
     """Start Streamlit server for testing."""
     import os
+
+    if shutil.which("streamlit") is None:
+        pytest.skip("streamlit executable not available; skipping e2e UI tests")
 
     # Change to project root
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))

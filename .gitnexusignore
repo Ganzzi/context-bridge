@@ -1,0 +1,31 @@
+# Build and dist
+dist/
+build/
+*.egg-info/
+__pycache__/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Caches
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+*.pyc

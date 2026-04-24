@@ -53,11 +53,16 @@ class TestResetDatabase:
 
             mock_config = MagicMock()
             mock_config.postgres_db = "production_db"  # Not dev database
+            mock_config.postgres_host = "localhost"
+            mock_config.postgres_port = 5432
+            mock_config.postgres_user = "postgres"
+            mock_config.postgres_password = "postgres"
+            mock_config.postgres_max_pool_size = 10
             mock_get_config.return_value = mock_config
 
-            # Function should just return without doing anything
+            # Function should refuse and return False for non-development databases
             result = await reset_database()
-            assert result is None
+            assert result is False
 
 
 class TestRunMigrations:

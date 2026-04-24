@@ -8,6 +8,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from typing import Dict, Any
+from psqlpy.exceptions import BaseConnectionPoolError
 
 from context_bridge.config import Config
 from context_bridge.database.postgres_manager import PostgreSQLManager
@@ -138,12 +139,19 @@ async def test_db_manager(test_db_config: Dict[str, Any]):
     )
 
     manager = PostgreSQLManager(config)
-    await manager.initialize()
+    try:
+        await manager.initialize()
+    except BaseConnectionPoolError as exc:
+        pytest.skip(f"PostgreSQL unavailable for integration tests: {exc}")
 
     # Set up test schema
     from context_bridge.database.init_databases import init_postgresql
 
-    await init_postgresql(manager)
+    try:
+        await init_postgresql()
+    except BaseConnectionPoolError as exc:
+        await manager.close()
+        pytest.skip(f"PostgreSQL unavailable for integration tests: {exc}")
 
     yield manager
 

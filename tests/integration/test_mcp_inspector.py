@@ -10,6 +10,7 @@ import subprocess
 import time
 import signal
 import os
+import shutil
 from typing import Optional
 
 
@@ -77,6 +78,8 @@ class MCPInspectorTester:
 
 @pytest.mark.manual
 def test_mcp_server_manual_inspection():
+    if os.name != "nt" or shutil.which("py") is None:
+        pytest.skip("manual MCP inspector test requires Windows 'py' launcher")
     """
     Manual test for MCP server inspection.
 
@@ -161,6 +164,8 @@ def test_mcp_inspector_integration():
 
 @pytest.mark.manual
 def test_server_startup_validation():
+    if os.name != "nt" or shutil.which("py") is None:
+        pytest.skip("manual MCP startup test requires Windows 'py' launcher")
     """Test that the MCP server can be started (basic validation)."""
     tester = MCPInspectorTester()
 
@@ -178,6 +183,8 @@ def test_server_startup_validation():
 
 @pytest.mark.manual
 def test_server_process_management():
+    if os.name != "nt" or shutil.which("py") is None:
+        pytest.skip("manual MCP process test requires Windows 'py' launcher")
     """Test server process management."""
     tester = MCPInspectorTester()
 

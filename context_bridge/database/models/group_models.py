@@ -88,6 +88,7 @@ class GroupCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=1000)
     context_enabled: bool = False
     context_model: Optional[str] = Field(None, max_length=255)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         use_enum_values = False

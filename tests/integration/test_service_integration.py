@@ -10,6 +10,7 @@ Tests services with real external dependencies:
 import pytest
 import asyncio
 from typing import List
+from playwright.async_api import Error as PlaywrightError
 
 
 @pytest.mark.integration
@@ -108,17 +109,22 @@ class TestCrawlingServiceIntegration:
             "https://httpbin.org/json",  # JSON endpoint
         ]
 
-        async with AsyncWebCrawler(verbose=False) as crawler:
-            for url in test_urls:
-                result = await real_crawling_service.crawl_webpage(crawler, url)
+        try:
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                for url in test_urls:
+                    result = await real_crawling_service.crawl_webpage(crawler, url)
 
-                assert result is not None
-                assert len(result.results) > 0
+                    assert result is not None
+                    assert len(result.results) > 0
 
-                page_result = result.results[0]
-                assert page_result.url == url
-                assert isinstance(page_result.markdown, str)
-                assert len(page_result.markdown) > 0
+                    page_result = result.results[0]
+                    assert page_result.url == url
+                    assert isinstance(page_result.markdown, str)
+                    assert len(page_result.markdown) > 0
+        except PlaywrightError as exc:
+            if "Executable doesn't exist" in str(exc):
+                pytest.skip("Playwright browser binaries are not installed")
+            raise
 
     @pytest.mark.asyncio
     async def test_crawling_error_handling(self, real_crawling_service):
@@ -131,15 +137,20 @@ class TestCrawlingServiceIntegration:
             "not-a-url-at-all",
         ]
 
-        async with AsyncWebCrawler(verbose=False) as crawler:
-            for url in invalid_urls:
-                try:
-                    result = await real_crawling_service.crawl_webpage(crawler, url)
-                    # Should handle errors gracefully
-                    assert result is not None
-                except Exception:
-                    # Acceptable to fail for truly invalid URLs
-                    pass
+        try:
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                for url in invalid_urls:
+                    try:
+                        result = await real_crawling_service.crawl_webpage(crawler, url)
+                        # Should handle errors gracefully
+                        assert result is not None
+                    except Exception:
+                        # Acceptable to fail for truly invalid URLs
+                        pass
+        except PlaywrightError as exc:
+            if "Executable doesn't exist" in str(exc):
+                pytest.skip("Playwright browser binaries are not installed")
+            raise
 
     @pytest.mark.asyncio
     async def test_crawling_with_depth_limit(self, real_crawling_service):
@@ -149,12 +160,17 @@ class TestCrawlingServiceIntegration:
         # Use a page that might have links but limit depth
         url = "https://httpbin.org/html"
 
-        async with AsyncWebCrawler(verbose=False) as crawler:
-            result = await real_crawling_service.crawl_webpage(crawler, url, depth=1)
+        try:
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                result = await real_crawling_service.crawl_webpage(crawler, url, depth=1)
 
-            assert result is not None
-            # Should get at least the main page
-            assert len(result.results) >= 1
+                assert result is not None
+                # Should get at least the main page
+                assert len(result.results) >= 1
+        except PlaywrightError as exc:
+            if "Executable doesn't exist" in str(exc):
+                pytest.skip("Playwright browser binaries are not installed")
+            raise
 
 
 @pytest.mark.integration
