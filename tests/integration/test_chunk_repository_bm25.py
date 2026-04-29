@@ -13,12 +13,10 @@ Requirements:
 import pytest
 
 import asyncio
-import pytest
 import logging
 from typing import List
+from uuid import uuid4
 
-from context_bridge.config import get_config
-from context_bridge.database.postgres_manager import PostgreSQLManager
 from context_bridge.database.repositories.document_repository import DocumentRepository
 from context_bridge.database.repositories.chunk_repository import ChunkRepository, SearchResult
 
@@ -35,20 +33,10 @@ def event_loop():
 
 
 @pytest.fixture(scope="module")
-async def db_manager():
-    """Create and initialize database manager."""
-    config = get_config()
-    manager = PostgreSQLManager(config)
-    await manager.initialize()
-    yield manager
-    await manager.close()
-
-
-@pytest.fixture(scope="module")
-async def repositories(db_manager):
+async def repositories(test_db_manager):
     """Create repository instances."""
-    doc_repo = DocumentRepository(db_manager)
-    chunk_repo = ChunkRepository(db_manager)
+    doc_repo = DocumentRepository(test_db_manager)
+    chunk_repo = ChunkRepository(test_db_manager)
     return {"doc_repo": doc_repo, "chunk_repo": chunk_repo}
 
 
@@ -61,8 +49,8 @@ async def test_document(repositories):
 
     # Create document
     doc_id = await doc_repo.create(
-        name="BM25 Test Document",
-        version="1.0.0",
+        name=f"BM25 Test Document {uuid4().hex[:8]}",
+        version=f"1.0.0-{uuid4().hex[:8]}",
         source_url="https://example.com/bm25-test",
         description="Test document for BM25 search functionality",
         metadata={"type": "test", "purpose": "bm25_testing"},

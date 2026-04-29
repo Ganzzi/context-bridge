@@ -374,21 +374,29 @@ class ChunkRepository:
             Exception: Database errors
         """
         try:
-            # Use proper BM25 with to_bm25query() and tokenize()
+            # Use bm25_catalog.search_bm25query with bm25_catalog.to_bm25query
+            # Requires search_path to include bm25_catalog and tokenizer_catalog
             # The index name 'idx_chunks_bm25' must match the BM25 index in schema
             query_sql = """
                 SELECT
                     id, document_id, group_id, chunk_index, content, embedding, created_at,
-                    bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($1, 'bert')) AS bm25_score
+                    bm25_catalog.search_bm25query(
+                        bm25_vector,
+                        bm25_catalog.to_bm25query(
+                            'idx_chunks_bm25'::regclass,
+                            tokenizer_catalog.tokenize($2, 'bert')
+                        )
+                    ) AS bm25_score
                 FROM chunks
-                WHERE document_id = $2
+                WHERE document_id = $1
                   AND bm25_vector IS NOT NULL
-                  AND bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($1, 'bert')) >= $3
                 ORDER BY bm25_score DESC
-                LIMIT $4
+                LIMIT $3
             """
             async with self.db_manager.connection() as conn:
-                result = await conn.execute(query_sql, [query, document_id, min_score, limit])
+                # Set search_path first, then execute the query
+                await conn.execute("SET search_path TO public, bm25_catalog, tokenizer_catalog")
+                result = await conn.execute(query_sql, [document_id, query, limit])
                 rows = result.result()
                 results = []
                 for rank, row in enumerate(rows, 1):
@@ -445,12 +453,13 @@ class ChunkRepository:
             top_k = min(50, limit * 5)
 
             query_sql = """
+                SET search_path TO public, bm25_catalog, tokenizer_catalog;
                 WITH vector_results AS (
                     SELECT
                         id,
                         1 - (embedding <=> $1) AS vector_score
                     FROM chunks
-                    WHERE document_id = $2 
+                    WHERE document_id = $2
                       AND embedding IS NOT NULL
                       AND 1 - (embedding <=> $1) >= $8
                     ORDER BY embedding <=> $1
@@ -459,11 +468,16 @@ class ChunkRepository:
                 bm25_results AS (
                     SELECT
                         id,
-                        bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($4, 'bert')) AS bm25_score
+                        bm25_catalog.search_bm25query(
+                            bm25_vector,
+                            bm25_catalog.to_bm25query(
+                                'idx_chunks_bm25'::regclass,
+                                tokenizer_catalog.tokenize($4, 'bert')
+                            )
+                        ) AS bm25_score
                     FROM chunks
-                    WHERE document_id = $2 
+                    WHERE document_id = $2
                       AND bm25_vector IS NOT NULL
-                      AND bm25_vector <&> to_bm25query('idx_chunks_bm25', tokenize($4, 'bert')) >= $9
                     ORDER BY bm25_score DESC
                     LIMIT $3
                 ),
@@ -515,6 +529,8 @@ class ChunkRepository:
             """
 
             async with self.db_manager.connection() as conn:
+                # Set search_path for bm25_catalog and tokenizer_catalog visibility
+                await conn.execute("SET search_path TO public, bm25_catalog, tokenizer_catalog")
                 result = await conn.execute(
                     query_sql,
                     [

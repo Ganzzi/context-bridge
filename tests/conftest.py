@@ -7,8 +7,15 @@ This module provides common test fixtures used across unit and integration tests
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
 from typing import Dict, Any
 from psqlpy.exceptions import BaseConnectionPoolError
+
+# Load .test.env for local QA configuration
+test_env_path = Path(__file__).parent.parent / ".test.env"
+if test_env_path.exists():
+    from dotenv import load_dotenv
+    load_dotenv(test_env_path, override=True)
 
 from context_bridge.config import Config
 from context_bridge.database.postgres_manager import PostgreSQLManager
@@ -115,12 +122,15 @@ def test_db_config() -> Dict[str, Any]:
     """Configuration for test database."""
     import os
 
+    # Use standard POSTGRES_* env vars (matching SDK behavior)
+    # Fall back to TEST_POSTGRES_* for CI compatibility
+    # Note: Password must be at least 8 characters (Config validation)
     return {
-        "host": os.getenv("TEST_POSTGRES_HOST", "localhost"),
-        "port": int(os.getenv("TEST_POSTGRES_PORT", "5432")),
-        "user": os.getenv("TEST_POSTGRES_USER", "postgres"),
-        "password": os.getenv("TEST_POSTGRES_PASSWORD", ""),
-        "database": os.getenv("TEST_POSTGRES_DB", "context_bridge_test"),
+        "host": os.getenv("POSTGRES_HOST", os.getenv("TEST_POSTGRES_HOST", "localhost")),
+        "port": int(os.getenv("POSTGRES_PORT", os.getenv("TEST_POSTGRES_PORT", "5433"))),
+        "user": os.getenv("POSTGRES_USER", os.getenv("TEST_POSTGRES_USER", "backend")),
+        "password": os.getenv("POSTGRES_PASSWORD", os.getenv("TEST_POSTGRES_PASSWORD", "backend123")),
+        "database": os.getenv("POSTGRES_DB", os.getenv("TEST_POSTGRES_DB", "backend")),
     }
 
 
@@ -342,8 +352,8 @@ async def test_database_setup(test_db_manager):
     """Set up test database with schema and basic data."""
     from context_bridge.database.init_databases import init_postgresql
 
-    # Initialize schema
-    await init_postgresql(test_db_manager)
+    # Initialize schema (init_postgresql takes no parameters, uses get_config())
+    await init_postgresql()
     yield test_db_manager
 
 

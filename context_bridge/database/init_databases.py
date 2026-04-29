@@ -197,105 +197,95 @@ async def init_postgresql():
         async with manager.connection() as conn:
             print("\n🏗️  Initializing PostgreSQL schema...")
 
-            # Ensure extensions exist
-        print("\n🔧 Ensuring extensions...")
-        extensions = [
-            ("vector", "Vector similarity search"),
-            ("vchord", "Hierarchical vector search"),
-            ("pg_tokenizer", "Text tokenization"),
-            ("vchord_bm25", "BM25 full-text search"),
-        ]
-        for ext_name, desc in extensions:
-            try:
-                await conn.execute(f"CREATE EXTENSION IF NOT EXISTS {ext_name} CASCADE")
-                print(f"   ✅ {ext_name}: {desc}")
-            except Exception as e:
-                print(f"   ⚠️  {ext_name}: {e}")
+            print("\n🔧 Ensuring extensions...")
+            extensions = [
+                ("vector", "Vector similarity search"),
+                ("vchord", "Hierarchical vector search"),
+                ("pg_tokenizer", "Text tokenization"),
+                ("vchord_bm25", "BM25 full-text search"),
+            ]
+            for ext_name, desc in extensions:
+                try:
+                    await conn.execute(f"CREATE EXTENSION IF NOT EXISTS {ext_name} CASCADE")
+                    print(f"   ✅ {ext_name}: {desc}")
+                except Exception as e:
+                    print(f"   ⚠️  {ext_name}: {e}")
 
-        # Read and execute extensions.sql
-        print("\n📄 Reading extensions.sql...")
-        schema_path = Path(__file__).parent / "schema" / "extensions.sql"
+            print("\n📄 Reading extensions.sql...")
+            schema_path = Path(__file__).parent / "schema" / "extensions.sql"
 
-        if not schema_path.exists():
-            print(f"   ❌ Schema file not found: {schema_path}")
-            return
+            if not schema_path.exists():
+                print(f"   ❌ Schema file not found: {schema_path}")
+                return
 
-        schema_sql = schema_path.read_text(encoding="utf-8")
+            schema_sql = schema_path.read_text(encoding="utf-8")
 
-        # Split into statements and execute
-        # Remove comments and split by semicolons, but not inside dollar-quoted strings
-        statements = []
-        current = []
-        in_dollar = False
+            statements = []
+            current = []
+            in_dollar = False
 
-        for line in schema_sql.split("\n"):
-            stripped = line.strip()
+            for line in schema_sql.split("\n"):
+                stripped = line.strip()
 
-            # Skip empty lines and comments
-            if not stripped or stripped.startswith("--"):
-                continue
+                if not stripped or stripped.startswith("--"):
+                    continue
 
-            # Track dollar-quoted strings
-            dollar_count = line.count("$$")
-            for _ in range(dollar_count):
-                in_dollar = not in_dollar
+                dollar_count = line.count("$$")
+                for _ in range(dollar_count):
+                    in_dollar = not in_dollar
 
-            current.append(line)
+                current.append(line)
 
-            # Split on semicolon only if not inside dollar quotes
-            if ";" in line and not in_dollar:
+                if ";" in line and not in_dollar:
+                    statements.append("\n".join(current))
+                    current = []
+
+            if current:
                 statements.append("\n".join(current))
-                current = []
 
-        if current:
-            statements.append("\n".join(current))
+            for i, statement in enumerate(statements, 1):
+                statement = statement.strip()
+                if not statement:
+                    continue
 
-        # Execute each statement
-        for i, statement in enumerate(statements, 1):
-            statement = statement.strip()
-            if not statement:
-                continue
+                try:
+                    await conn.execute(statement)
+                    if "CREATE TABLE" in statement:
+                        if "IF NOT EXISTS" in statement:
+                            table_name = (
+                                statement.split("CREATE TABLE IF NOT EXISTS")[1].split("(")[0].strip()
+                            )
+                        else:
+                            table_name = statement.split("CREATE TABLE")[1].split("(")[0].strip()
+                        print(f"   ✅ Table: {table_name}")
+                    elif "CREATE INDEX" in statement:
+                        if "IF NOT EXISTS" in statement:
+                            index_name = (
+                                statement.split("CREATE INDEX IF NOT EXISTS")[1].split("ON")[0].strip()
+                            )
+                        else:
+                            index_name = statement.split("CREATE INDEX")[1].split("ON")[0].strip()
+                        print(f"   ✅ Index: {index_name}")
+                    elif "CREATE TRIGGER" in statement:
+                        trigger_name = statement.split("CREATE TRIGGER")[1].split("BEFORE")[0].strip()
+                        print(f"   ✅ Trigger: {trigger_name}")
+                    elif "CREATE OR REPLACE FUNCTION" in statement or "CREATE FUNCTION" in statement:
+                        func_name = statement.split("FUNCTION")[1].split("(")[0].strip()
+                        print(f"   ✅ Function: {func_name}")
+                    elif "SELECT tokenizer_catalog.create_tokenizer" in statement:
+                        print(f"   ✅ Tokenizer: bert")
+                    elif "CREATE OR REPLACE VIEW" in statement or "CREATE VIEW" in statement:
+                        view_name = statement.split("VIEW")[1].split("AS")[0].strip()
+                        print(f"   ✅ View: {view_name}")
+                    elif "DROP TRIGGER" in statement:
+                        trigger_name = statement.split("DROP TRIGGER")[1].split("ON")[0].strip()
+                        print(f"   ✅ Drop Trigger: {trigger_name}")
+                except Exception as e:
+                    print(f"   ❌ Error in statement {i}: {e}")
+                    print(f"      Statement: {statement[:100]}...")
 
-            try:
-                await conn.execute(statement)
-                # Extract table/object name for logging
-                if "CREATE TABLE" in statement:
-                    if "IF NOT EXISTS" in statement:
-                        table_name = (
-                            statement.split("CREATE TABLE IF NOT EXISTS")[1].split("(")[0].strip()
-                        )
-                    else:
-                        table_name = statement.split("CREATE TABLE")[1].split("(")[0].strip()
-                    print(f"   ✅ Table: {table_name}")
-                elif "CREATE INDEX" in statement:
-                    if "IF NOT EXISTS" in statement:
-                        index_name = (
-                            statement.split("CREATE INDEX IF NOT EXISTS")[1].split("ON")[0].strip()
-                        )
-                    else:
-                        index_name = statement.split("CREATE INDEX")[1].split("ON")[0].strip()
-                    print(f"   ✅ Index: {index_name}")
-                elif "CREATE TRIGGER" in statement:
-                    trigger_name = statement.split("CREATE TRIGGER")[1].split("BEFORE")[0].strip()
-                    print(f"   ✅ Trigger: {trigger_name}")
-                elif "CREATE OR REPLACE FUNCTION" in statement or "CREATE FUNCTION" in statement:
-                    func_name = statement.split("FUNCTION")[1].split("(")[0].strip()
-                    print(f"   ✅ Function: {func_name}")
-                elif "SELECT create_tokenizer" in statement:
-                    print(f"   ✅ Tokenizer: bert")
-                elif "CREATE OR REPLACE VIEW" in statement or "CREATE VIEW" in statement:
-                    view_name = statement.split("VIEW")[1].split("AS")[0].strip()
-                    print(f"   ✅ View: {view_name}")
-                elif "DROP TRIGGER" in statement:
-                    trigger_name = statement.split("DROP TRIGGER")[1].split("ON")[0].strip()
-                    print(f"   ✅ Drop Trigger: {trigger_name}")
-            except Exception as e:
-                print(f"   ❌ Error in statement {i}: {e}")
-                print(f"      Statement: {statement[:100]}...")
+            print("\n✅ PostgreSQL schema initialization complete!")
 
-        print("\n✅ PostgreSQL schema initialization complete!")
-
-        # Run migrations
         await run_migrations()
 
     except Exception as e:
