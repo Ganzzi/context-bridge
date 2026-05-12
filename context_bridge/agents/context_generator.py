@@ -180,7 +180,7 @@ class ContextGenerator:
         user_prompt = USER_PROMPT_TEMPLATE.format(chunk_content=chunk_content)
 
         try:
-            provider_call = self.model_provider.run_agent(
+            result = await self.model_provider.run_agent(
                 self._agent,
                 user_prompt,
                 model_info=self.config.context_agent_model,
@@ -193,10 +193,6 @@ class ContextGenerator:
                     "operation": "context_generation",
                 },
             )
-            if asyncio.iscoroutine(provider_call):
-                result = await provider_call
-            else:
-                result = await self._agent.run(user_prompt)
             context = result.output.context
 
             # Track token usage if processor is registered
