@@ -453,7 +453,6 @@ class ChunkRepository:
             top_k = min(50, limit * 5)
 
             query_sql = """
-                SET search_path TO public, bm25_catalog, tokenizer_catalog;
                 WITH vector_results AS (
                     SELECT
                         id,
