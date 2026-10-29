@@ -19,7 +19,7 @@ def streamlit_server():
         pytest.skip("streamlit executable not available; skipping e2e UI tests")
 
     # Change to project root
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
     # Start the Streamlit server
     process = subprocess.Popen(

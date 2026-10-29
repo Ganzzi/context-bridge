@@ -377,10 +377,12 @@ class ChunkRepository:
             # Use bm25_catalog.search_bm25query with bm25_catalog.to_bm25query
             # Requires search_path to include bm25_catalog and tokenizer_catalog
             # The index name 'idx_chunks_bm25' must match the BM25 index in schema
+            # search_bm25query returns negative scores for matches (more negative = better)
+            # and -0.0 for non-matches. Negate to get positive similarity scores.
             query_sql = """
                 SELECT
                     id, document_id, group_id, chunk_index, content, embedding, created_at,
-                    bm25_catalog.search_bm25query(
+                    -bm25_catalog.search_bm25query(
                         bm25_vector,
                         bm25_catalog.to_bm25query(
                             'idx_chunks_bm25'::regclass,
@@ -399,10 +401,11 @@ class ChunkRepository:
                 result = await conn.execute(query_sql, [document_id, query, limit])
                 rows = result.result()
                 results = []
-                for rank, row in enumerate(rows, 1):
+                for row in rows:
                     chunk = self._row_to_chunk(row)
                     score = float(row["bm25_score"])
-                    results.append(SearchResult(chunk=chunk, score=score, rank=rank))
+                    if score > 0 and score >= min_score:
+                        results.append(SearchResult(chunk=chunk, score=score, rank=len(results) + 1))
                 logger.debug(f"BM25 search found {len(results)} chunks for document {document_id}")
                 return results
         except Exception as e:
@@ -453,7 +456,6 @@ class ChunkRepository:
             top_k = min(50, limit * 5)
 
             query_sql = """
-                SET search_path TO public, bm25_catalog, tokenizer_catalog;
                 WITH vector_results AS (
                     SELECT
                         id,
@@ -468,7 +470,7 @@ class ChunkRepository:
                 bm25_results AS (
                     SELECT
                         id,
-                        bm25_catalog.search_bm25query(
+                        -bm25_catalog.search_bm25query(
                             bm25_vector,
                             bm25_catalog.to_bm25query(
                                 'idx_chunks_bm25'::regclass,
