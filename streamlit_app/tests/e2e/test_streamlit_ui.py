@@ -1,5 +1,7 @@
 """End-to-end tests for Streamlit UI using Playwright."""
 
+from pathlib import Path
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -13,7 +15,7 @@ class TestNavigationAndHome:
         import os
 
         os.makedirs("tests/e2e/screenshots", exist_ok=True)
-        streamlit_page.screenshot(path="tests/e2e/screenshots/home_page.png")
+        streamlit_page.screenshot(path=Path(__file__).parent / "screenshots" / "home_page.png")
 
         # Print page content for debugging
         content = streamlit_page.content()
@@ -65,7 +67,7 @@ class TestNavigationAndHome:
         import os
 
         os.makedirs("tests/e2e/screenshots", exist_ok=True)
-        streamlit_page.screenshot(path="tests/e2e/screenshots/documents_page.png")
+        streamlit_page.screenshot(path=Path(__file__).parent / "screenshots" / "documents_page.png")
 
         # Verify we're on the documents page - use heading role
         expect(streamlit_page.get_by_role("heading", name="📚 Document Management")).to_be_visible()
