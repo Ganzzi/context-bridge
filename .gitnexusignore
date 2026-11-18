@@ -29,3 +29,19 @@ htmlcov/
 # OS
 .DS_Store
 *.pyc
+
+# Local tool output and generated QA evidence
+.gitnexus/
+.claude/
+.agents/
+.playwright-mcp/
+.env
+.env.*
+*.env
+.pytest-report.json
+test-results/
+test_reports/
+playwright-report/
+coverage/
+coverage.xml
+.coverage.*
